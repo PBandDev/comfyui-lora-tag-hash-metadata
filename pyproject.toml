@@ -40,5 +40,16 @@ filename = "src/index.ts"
 search = 'Version {current_version}'
 replace = 'Version {new_version}'
 
+[[tool.bumpversion.files]]
+filename = "uv.lock"
+search = """
+name = "comfyui-lora-tag-hash-metadata"
+version = "{current_version}"
+"""
+replace = """
+name = "comfyui-lora-tag-hash-metadata"
+version = "{new_version}"
+"""
+
 [dependency-groups]
 dev = ["pytest>=9.0.2"]

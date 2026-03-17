@@ -77,6 +77,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - name: Bump version
         id: bump
         uses: callowayproject/bump-my-version@master
@@ -85,6 +95,10 @@ jobs:
         with:
           args: ${{ github.event.inputs.bump_type }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify bumped Python lockfile
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv sync --locked
 
       - name: Create GitHub Release
         if: steps.bump.outputs.bumped == 'true'
