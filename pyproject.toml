@@ -9,7 +9,7 @@ license = { file = "LICENSE" }
 Repository = "https://github.com/PBandDev/comfyui-lora-tag-hash-metadata"
 
 [tool.comfy]
-PublisherId = "PBandDev"
+PublisherId = "pbanddev"
 DisplayName = "LoRA Tag Hash Metadata"
 Icon = "https://raw.githubusercontent.com/PBandDev/comfyui-lora-tag-hash-metadata/main/assets/icon.svg"
 requires-comfyui = ">=0.3.0"
@@ -41,6 +41,4 @@ search = 'Version {current_version}'
 replace = 'Version {new_version}'
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
+dev = ["pytest>=9.0.2"]
