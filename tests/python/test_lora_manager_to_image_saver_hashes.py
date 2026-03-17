@@ -162,9 +162,9 @@ def test_import_requires_comfy_api_module() -> None:
 def test_node_schema_exposes_expected_io() -> None:
     schema = LoraManagerToImageSaverHashes.define_schema()
 
-    assert schema.node_id == "LoraManagerToImageSaverHashes"
-    assert schema.display_name == "LoraManager To Image Saver Hashes"
-    assert schema.category == "ImageSaver/utils"
+    assert schema.node_id == "LoraTagsToHashMetadata"
+    assert schema.display_name == "LoRA Tags To Hash Metadata"
+    assert schema.category == "utils/metadata"
     assert [item.name for item in schema.inputs] == ["loaded_loras"]
     assert [item.name for item in schema.outputs] == [
         "additional_hashes",
@@ -220,7 +220,10 @@ def test_parse_ignores_blank_lora_names() -> None:
 
 
 def test_parse_ignores_names_with_commas() -> None:
-    assert parse_loaded_loras("<lora:foo,bar:0.8> <lora:baz:1.2>") == [("baz", 1.2)]
+    assert parse_loaded_loras("<lora:foo,bar:0.8> <lora:baz:1.2>") == [
+        ("foo,bar", 0.8),
+        ("baz", 1.2),
+    ]
 
 
 def test_resolve_lora_path_uses_comfyui_lora_model_paths(monkeypatch) -> None:
@@ -231,6 +234,19 @@ def test_resolve_lora_path_uses_comfyui_lora_model_paths(monkeypatch) -> None:
     monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
 
     assert resolve_lora_path("foo") == "C:/ComfyUI/models/loras/nested/foo.safetensors"
+
+
+def test_resolve_lora_path_prefers_exact_relative_path_before_stem(monkeypatch) -> None:
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: [
+            "other/foo.safetensors",
+            "nested/foo.safetensors",
+        ],
+        get_full_path=lambda category, name: f"C:/ComfyUI/models/loras/{name}",
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+
+    assert resolve_lora_path("nested/foo") == "C:/ComfyUI/models/loras/nested/foo.safetensors"
 
 
 def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) -> None:
@@ -250,7 +266,9 @@ def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) 
     assert result.missing_loras == "bar"
 
 
-def test_build_additional_hashes_skips_comma_bearing_names(tmp_path: Path) -> None:
+def test_build_additional_hashes_reports_comma_bearing_names_as_missing(
+    tmp_path: Path,
+) -> None:
     safe = tmp_path / "safe.safetensors"
     unsafe = tmp_path / "unsafe.safetensors"
     safe.write_bytes(b"safe")
@@ -268,7 +286,7 @@ def test_build_additional_hashes_skips_comma_bearing_names(tmp_path: Path) -> No
     expected_hash = hashlib.sha256(b"safe").hexdigest().upper()[:10]
     assert result.additional_hashes == f"safe:{expected_hash}:1.2"
     assert result.resolved_loras == "safe"
-    assert result.missing_loras == ""
+    assert result.missing_loras == r"bad\,name"
 
 
 def test_build_additional_hashes_uses_last_duplicate_and_joins_resolved_entries(

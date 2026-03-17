@@ -55,9 +55,9 @@ pnpm test       # Run tests
 
 **Note:** Reload ComfyUI frontend (browser refresh) for JS changes. Restart ComfyUI server for Python changes.
 
-## LoraManager to Image Saver
+## LoRA Tag Hash Metadata
 
-Wire `loaded_loras` from `Lora Loader (LoraManager)` into `LoraManager To Image Saver Hashes`, then connect `additional_hashes` to `Image Saver Metadata.additional_hashes`.
+Wire any `<lora:name:weight>` text source into `LoRA Tags To Hash Metadata`, then connect `additional_hashes` to any downstream node that expects `Name:HASH:Weight` metadata, including `Image Saver Metadata.additional_hashes`.
 
 ## Publishing to ComfyUI Registry
 

@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import hashlib
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 
 try:
@@ -28,8 +28,6 @@ def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
     for name, raw_weight in LORA_PATTERN.findall(value or ""):
         normalized_name = name.strip()
         if not normalized_name:
-            continue
-        if "," in normalized_name:
             continue
         if raw_weight is None or raw_weight == "":
             weight = 1.0
@@ -57,11 +55,28 @@ def resolve_lora_path(name: str) -> str | None:
         return None
 
     filenames = folder_paths.get_filename_list("loras")
-    normalized = Path(name).stem.lower()
+    requested = PurePosixPath(name.replace("\\", "/"))
+    requested_full = requested.as_posix().lower()
+    requested_no_ext = requested.with_suffix("").as_posix().lower()
+    basename_matches: list[str] = []
+
     for candidate in filenames:
-        if Path(candidate).stem.lower() == normalized:
+        candidate_path = PurePosixPath(str(candidate).replace("\\", "/"))
+        candidate_full = candidate_path.as_posix().lower()
+        candidate_no_ext = candidate_path.with_suffix("").as_posix().lower()
+        if candidate_full == requested_full or candidate_no_ext == requested_no_ext:
+            return folder_paths.get_full_path("loras", candidate)
+        if candidate_path.stem.lower() == requested.stem.lower():
+            basename_matches.append(candidate)
+
+    for candidate in basename_matches:
+        if Path(candidate).stem.lower() == requested.stem.lower():
             return folder_paths.get_full_path("loras", candidate)
     return None
+
+
+def _format_missing_name(name: str) -> str:
+    return name.replace("\\", "\\\\").replace(",", "\\,")
 
 
 def build_additional_hashes(
@@ -79,9 +94,12 @@ def build_additional_hashes(
     missing_loras: list[str] = []
 
     for name, weight in deduped.items():
+        if "," in name:
+            missing_loras.append(_format_missing_name(name))
+            continue
         resolved_path = resolver(name)
         if resolved_path is None:
-            missing_loras.append(name)
+            missing_loras.append(_format_missing_name(name))
             continue
         formatted_hashes.append(f"{name}:{sha256_10(resolved_path)}:{weight}")
         resolved_loras.append(name)
@@ -97,10 +115,10 @@ class LoraManagerToImageSaverHashes(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="LoraManagerToImageSaverHashes",
-            display_name="LoraManager To Image Saver Hashes",
-            category="ImageSaver/utils",
-            description="Convert LoraManager loaded_loras text to Image Saver additional_hashes.",
+            node_id="LoraTagsToHashMetadata",
+            display_name="LoRA Tags To Hash Metadata",
+            category="utils/metadata",
+            description="Convert <lora:name:weight> tags into Name:HASH:Weight metadata strings for downstream nodes.",
             inputs=[io.String.Input("loaded_loras", multiline=True)],
             outputs=[
                 io.String.Output("additional_hashes"),
