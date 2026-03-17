@@ -16,3 +16,5 @@ node.zip
 .vscode/
 .claude/
 .changeset/
+docs/plans/
+.worktrees/
