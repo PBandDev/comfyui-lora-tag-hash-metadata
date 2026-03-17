@@ -1,4 +1,4 @@
-import builtins
+from dataclasses import dataclass
 import hashlib
 import importlib.util
 import types
@@ -7,17 +7,70 @@ import sys
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 
-import lora_manager_to_image_saver_hashes as lora_hashes
 
-from lora_manager_to_image_saver_hashes import (
-    LoraManagerToImageSaverHashes,
-    build_additional_hashes,
-    parse_loaded_loras,
-    resolve_lora_path,
-    sha256_10,
-)
+@dataclass(frozen=True)
+class _FakeStringPort:
+    name: str
+    multiline: bool = False
+
+
+class _FakeString:
+    Type = str
+
+    @staticmethod
+    def Input(name: str, multiline: bool = False) -> _FakeStringPort:
+        return _FakeStringPort(name=name, multiline=multiline)
+
+    @staticmethod
+    def Output(name: str) -> _FakeStringPort:
+        return _FakeStringPort(name=name)
+
+
+@dataclass(frozen=True)
+class _FakeSchema:
+    node_id: str
+    display_name: str
+    category: str
+    description: str
+    inputs: list[object]
+    outputs: list[object]
+
+
+class _FakeComfyNode:
+    pass
+
+
+class _FakeIO:
+    ComfyNode = _FakeComfyNode
+    Schema = _FakeSchema
+    String = _FakeString
+
+
+class _FakeComfyExtension:
+    async def get_node_list(self) -> list[type[_FakeComfyNode]]:
+        return []
+
+
+def _install_fake_comfy_api() -> None:
+    comfy_api_module = types.ModuleType("comfy_api")
+    comfy_api_module.__path__ = []
+
+    comfy_api_v002_module = types.ModuleType("comfy_api.v0_0_2")
+    comfy_api_v002_module.ComfyExtension = _FakeComfyExtension
+    comfy_api_v002_module.io = _FakeIO()
+
+    comfy_api_module.v0_0_2 = comfy_api_v002_module
+
+    sys.modules["comfy_api"] = comfy_api_module
+    sys.modules["comfy_api.v0_0_2"] = comfy_api_v002_module
+
+
+def _remove_fake_comfy_api() -> None:
+    sys.modules.pop("comfy_api.v0_0_2", None)
+    sys.modules.pop("comfy_api", None)
 
 
 def _load_module_from_path(
@@ -43,10 +96,23 @@ def _load_module_from_path(
     return module
 
 
+_install_fake_comfy_api()
+lora_hashes = _load_module_from_path(
+    "lora_manager_to_image_saver_hashes",
+    REPO_ROOT / "lora_manager_to_image_saver_hashes.py",
+)
+LoraManagerToImageSaverHashes = lora_hashes.LoraManagerToImageSaverHashes
+build_additional_hashes = lora_hashes.build_additional_hashes
+parse_loaded_loras = lora_hashes.parse_loaded_loras
+resolve_lora_path = lora_hashes.resolve_lora_path
+sha256_10 = lora_hashes.sha256_10
+
+
 def test_package_entrypoint_loads_via_package_import_path(monkeypatch) -> None:
-    package_root = Path(__file__).resolve().parents[2]
+    package_root = REPO_ROOT
     module_path = package_root / "__init__.py"
 
+    _install_fake_comfy_api()
     monkeypatch.chdir(package_root.parent)
     monkeypatch.delitem(sys.modules, "lora_manager_to_image_saver_hashes", raising=False)
     monkeypatch.setattr(
@@ -65,19 +131,15 @@ def test_package_entrypoint_loads_via_package_import_path(monkeypatch) -> None:
     assert type(extension).__name__ == "LoraHashBridgeExtension"
 
 
-def test_import_propagates_non_comfy_api_module_errors(monkeypatch) -> None:
-    module_path = Path(__file__).resolve().parents[2] / "lora_manager_to_image_saver_hashes.py"
-    real_import = builtins.__import__
+def test_import_requires_comfy_api_module() -> None:
+    module_path = REPO_ROOT / "lora_manager_to_image_saver_hashes.py"
 
-    def raising_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "comfy_api.v0_0_2":
-            raise ModuleNotFoundError("No module named 'broken_dependency'", name="broken_dependency")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", raising_import)
-
-    with pytest.raises(ModuleNotFoundError, match="broken_dependency"):
-        _load_module_from_path("test_lora_hash_bridge_import_error", module_path)
+    _remove_fake_comfy_api()
+    try:
+        with pytest.raises(ModuleNotFoundError, match="comfy_api"):
+            _load_module_from_path("test_lora_hash_bridge_missing_api", module_path)
+    finally:
+        _install_fake_comfy_api()
 
 
 def test_node_schema_exposes_expected_io() -> None:

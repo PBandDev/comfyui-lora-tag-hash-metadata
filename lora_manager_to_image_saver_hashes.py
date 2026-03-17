@@ -10,50 +10,7 @@ try:
 except ImportError:
     folder_paths = None
 
-try:
-    from comfy_api.v0_0_2 import ComfyExtension, io
-except ModuleNotFoundError as exc:
-    if exc.name != "comfy_api":
-        raise
-
-    @dataclass(frozen=True)
-    class _CompatStringPort:
-        name: str
-        multiline: bool = False
-
-    class _CompatString:
-        Type = str
-
-        @staticmethod
-        def Input(name: str, multiline: bool = False) -> _CompatStringPort:
-            return _CompatStringPort(name=name, multiline=multiline)
-
-        @staticmethod
-        def Output(name: str) -> _CompatStringPort:
-            return _CompatStringPort(name=name)
-
-    @dataclass(frozen=True)
-    class _CompatSchema:
-        node_id: str
-        display_name: str
-        category: str
-        description: str
-        inputs: list[object]
-        outputs: list[object]
-
-    class _CompatComfyNode:
-        pass
-
-    class _CompatIO:
-        ComfyNode = _CompatComfyNode
-        Schema = _CompatSchema
-        String = _CompatString
-
-    class ComfyExtension:
-        async def get_node_list(self) -> list[type[_CompatComfyNode]]:
-            return []
-
-    io = _CompatIO()
+from comfy_api.v0_0_2 import ComfyExtension, io
 
 
 LORA_PATTERN = re.compile(r"<lora:([^:>]+)(?::([^:>]+))?>", re.IGNORECASE)
