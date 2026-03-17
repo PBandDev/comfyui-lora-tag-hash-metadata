@@ -5,6 +5,11 @@ import math
 from pathlib import Path
 import re
 
+try:
+    import folder_paths
+except ImportError:
+    folder_paths = None
+
 
 LORA_PATTERN = re.compile(r"<lora:([^:>]+)(?::([^:>]+))?>", re.IGNORECASE)
 
@@ -45,9 +50,21 @@ def sha256_10(path: str) -> str:
     return hasher.hexdigest().upper()[:10]
 
 
+def resolve_lora_path(name: str) -> str | None:
+    if folder_paths is None:
+        return None
+
+    filenames = folder_paths.get_filename_list("loras")
+    normalized = Path(name).stem.lower()
+    for candidate in filenames:
+        if Path(candidate).stem.lower() == normalized:
+            return folder_paths.get_full_path("loras", candidate)
+    return None
+
+
 def build_additional_hashes(
     value: str,
-    resolver: Callable[[str], str | None],
+    resolver: Callable[[str], str | None] = resolve_lora_path,
 ) -> HashBridgeResult:
     deduped: dict[str, float] = {}
     for name, weight in parse_loaded_loras(value):

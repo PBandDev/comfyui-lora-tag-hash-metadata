@@ -1,12 +1,16 @@
 import hashlib
+import types
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import lora_manager_to_image_saver_hashes as lora_hashes
+
 from lora_manager_to_image_saver_hashes import (
     build_additional_hashes,
     parse_loaded_loras,
+    resolve_lora_path,
     sha256_10,
 )
 
@@ -40,6 +44,16 @@ def test_parse_ignores_blank_lora_names() -> None:
 
 def test_parse_ignores_names_with_commas() -> None:
     assert parse_loaded_loras("<lora:foo,bar:0.8> <lora:baz:1.2>") == [("baz", 1.2)]
+
+
+def test_resolve_lora_path_uses_comfyui_lora_model_paths(monkeypatch) -> None:
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: ["nested/foo.safetensors", "bar.safetensors"],
+        get_full_path=lambda category, name: f"C:/ComfyUI/models/loras/{name}",
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+
+    assert resolve_lora_path("foo") == "C:/ComfyUI/models/loras/nested/foo.safetensors"
 
 
 def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) -> None:
