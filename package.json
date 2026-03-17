@@ -1,7 +1,7 @@
 {
   "name": "comfyui-lora-tag-hash-metadata",
   "version": "1.0.0",
-  "description": "ComfyUI node that converts <lora:name:weight> tags into Name:HASH:Weight metadata strings.",
+  "description": "ComfyUI node that converts <lora:name:weight> tags into Civitai-friendly Name:HASH:Weight metadata strings.",
   "type": "module",
   "scripts": {
     "dev": "tsc && vite build --watch",
@@ -14,7 +14,11 @@
   "keywords": [
     "comfyui",
     "custom node",
-    "extension"
+    "extension",
+    "civitai",
+    "lora",
+    "metadata",
+    "image saver"
   ],
   "author": "PBandDev",
   "license": "MIT",

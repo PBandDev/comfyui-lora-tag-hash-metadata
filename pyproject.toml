@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-lora-tag-hash-metadata"
-description = "ComfyUI node that converts <lora:name:weight> tags into Name:HASH:Weight metadata strings."
+description = "ComfyUI node that converts <lora:name:weight> tags into Civitai-friendly Name:HASH:Weight metadata strings."
 version = "1.0.0"
 readme = "README.md"
 license = { file = "LICENSE" }
