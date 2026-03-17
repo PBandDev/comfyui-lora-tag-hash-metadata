@@ -38,6 +38,10 @@ def test_parse_ignores_blank_lora_names() -> None:
     assert parse_loaded_loras("<lora:   :0.8>") == []
 
 
+def test_parse_ignores_names_with_commas() -> None:
+    assert parse_loaded_loras("<lora:foo,bar:0.8> <lora:baz:1.2>") == [("baz", 1.2)]
+
+
 def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) -> None:
     existing = tmp_path / "foo.safetensors"
     existing.write_bytes(b"abc")
@@ -53,6 +57,27 @@ def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) 
     assert result.additional_hashes == f"foo:{expected_hash}:0.8"
     assert result.resolved_loras == "foo"
     assert result.missing_loras == "bar"
+
+
+def test_build_additional_hashes_skips_comma_bearing_names(tmp_path: Path) -> None:
+    safe = tmp_path / "safe.safetensors"
+    unsafe = tmp_path / "unsafe.safetensors"
+    safe.write_bytes(b"safe")
+    unsafe.write_bytes(b"unsafe")
+
+    def resolver(name: str) -> str | None:
+        mapping = {
+            "safe": str(safe),
+            "bad,name": str(unsafe),
+        }
+        return mapping.get(name)
+
+    result = build_additional_hashes("<lora:bad,name:0.8> <lora:safe:1.2>", resolver)
+
+    expected_hash = hashlib.sha256(b"safe").hexdigest().upper()[:10]
+    assert result.additional_hashes == f"safe:{expected_hash}:1.2"
+    assert result.resolved_loras == "safe"
+    assert result.missing_loras == ""
 
 
 def test_build_additional_hashes_uses_last_duplicate_and_joins_resolved_entries(

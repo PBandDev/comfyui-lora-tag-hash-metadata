@@ -22,6 +22,8 @@ def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
         normalized_name = name.strip()
         if not normalized_name:
             continue
+        if "," in normalized_name:
+            continue
         if raw_weight is None or raw_weight == "":
             weight = 1.0
         else:
