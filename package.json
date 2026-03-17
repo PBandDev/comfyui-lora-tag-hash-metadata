@@ -1,6 +1,6 @@
 {
   "name": "comfyui-lora-tag-hash-metadata",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "ComfyUI node that converts <lora:name:weight> tags into Civitai-friendly Name:HASH:Weight metadata strings.",
   "type": "module",
   "scripts": {
