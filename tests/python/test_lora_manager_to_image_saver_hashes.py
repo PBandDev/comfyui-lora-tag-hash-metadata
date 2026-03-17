@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from lora_manager_to_image_saver_hashes import parse_loaded_loras
+from lora_manager_to_image_saver_hashes import build_additional_hashes, parse_loaded_loras
 
 
 def test_parse_single_lora() -> None:
@@ -31,3 +31,19 @@ def test_parse_ignores_non_finite_weights() -> None:
 
 def test_parse_ignores_blank_lora_names() -> None:
     assert parse_loaded_loras("<lora:   :0.8>") == []
+
+
+def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) -> None:
+    existing = tmp_path / "foo.safetensors"
+    existing.write_bytes(b"abc")
+
+    def resolver(name: str) -> str | None:
+        if name == "foo":
+            return str(existing)
+        return None
+
+    result = build_additional_hashes("<lora:foo:0.8> <lora:bar:1.2>", resolver)
+
+    assert result.additional_hashes.count(":") == 2
+    assert result.resolved_loras == "foo"
+    assert result.missing_loras == "bar"
