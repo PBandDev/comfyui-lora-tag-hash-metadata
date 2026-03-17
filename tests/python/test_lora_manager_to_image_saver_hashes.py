@@ -19,3 +19,7 @@ def test_parse_multiple_loras() -> None:
         ("foo", 0.8),
         ("bar", 1.2),
     ]
+
+
+def test_parse_ignores_malformed_loras() -> None:
+    assert parse_loaded_loras("<lora:foo:abc> <lora:bar:0.8:extra>") == []
