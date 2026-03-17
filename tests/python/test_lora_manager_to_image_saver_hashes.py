@@ -1,9 +1,14 @@
+import hashlib
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from lora_manager_to_image_saver_hashes import build_additional_hashes, parse_loaded_loras
+from lora_manager_to_image_saver_hashes import (
+    build_additional_hashes,
+    parse_loaded_loras,
+    sha256_10,
+)
 
 
 def test_parse_single_lora() -> None:
@@ -44,6 +49,50 @@ def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) 
 
     result = build_additional_hashes("<lora:foo:0.8> <lora:bar:1.2>", resolver)
 
-    assert result.additional_hashes.count(":") == 2
+    expected_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    assert result.additional_hashes == f"foo:{expected_hash}:0.8"
     assert result.resolved_loras == "foo"
     assert result.missing_loras == "bar"
+
+
+def test_build_additional_hashes_uses_last_duplicate_and_joins_resolved_entries(
+    tmp_path: Path,
+) -> None:
+    foo = tmp_path / "foo.safetensors"
+    bar = tmp_path / "bar.safetensors"
+    foo.write_bytes(b"abc")
+    bar.write_bytes(b"xyz")
+
+    def resolver(name: str) -> str | None:
+        mapping = {
+            "foo": str(foo),
+            "bar": str(bar),
+        }
+        return mapping.get(name)
+
+    result = build_additional_hashes(
+        "<lora:foo:0.8> <lora:bar:1.2> <lora:foo:0.5>",
+        resolver,
+    )
+
+    foo_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    bar_hash = hashlib.sha256(b"xyz").hexdigest().upper()[:10]
+    assert result.additional_hashes == f"bar:{bar_hash}:1.2,foo:{foo_hash}:0.5"
+    assert result.resolved_loras == "bar,foo"
+    assert result.missing_loras == ""
+
+
+def test_sha256_10_hashes_without_path_read_bytes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    target = tmp_path / "chunked.safetensors"
+    payload = (b"chunk" * 2048) + b"tail"
+    target.write_bytes(payload)
+
+    def fail_read_bytes(self: Path) -> bytes:
+        raise AssertionError("sha256_10 should stream file content")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    assert sha256_10(str(target)) == hashlib.sha256(payload).hexdigest().upper()[:10]

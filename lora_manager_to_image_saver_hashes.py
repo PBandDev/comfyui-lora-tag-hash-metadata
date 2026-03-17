@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 import hashlib
 import math
@@ -35,13 +36,16 @@ def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
 
 
 def sha256_10(path: str) -> str:
-    digest = hashlib.sha256(Path(path).read_bytes()).hexdigest().upper()
-    return digest[:10]
+    hasher = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        while chunk := handle.read(8192):
+            hasher.update(chunk)
+    return hasher.hexdigest().upper()[:10]
 
 
 def build_additional_hashes(
     value: str,
-    resolver,
+    resolver: Callable[[str], str | None],
 ) -> HashBridgeResult:
     deduped: dict[str, float] = {}
     for name, weight in parse_loaded_loras(value):
