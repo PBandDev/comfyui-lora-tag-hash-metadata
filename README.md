@@ -55,6 +55,10 @@ pnpm test       # Run tests
 
 **Note:** Reload ComfyUI frontend (browser refresh) for JS changes. Restart ComfyUI server for Python changes.
 
+## LoraManager to Image Saver
+
+Wire `loaded_loras` from `Lora Loader (LoraManager)` into `LoraManager To Image Saver Hashes`, then connect `additional_hashes` to `Image Saver Metadata.additional_hashes`.
+
 ## Publishing to ComfyUI Registry
 
 1. Ensure all fields in `pyproject.toml` are correct
