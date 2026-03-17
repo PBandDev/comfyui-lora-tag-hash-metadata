@@ -12,7 +12,10 @@ except ImportError:
 
 try:
     from comfy_api.v0_0_2 import ComfyExtension, io
-except ImportError:
+except ModuleNotFoundError as exc:
+    if exc.name != "comfy_api":
+        raise
+
     @dataclass(frozen=True)
     class _CompatStringPort:
         name: str

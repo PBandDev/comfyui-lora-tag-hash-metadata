@@ -1,7 +1,11 @@
+import builtins
 import hashlib
+import importlib.util
 import types
 from pathlib import Path
 import sys
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -14,6 +18,66 @@ from lora_manager_to_image_saver_hashes import (
     resolve_lora_path,
     sha256_10,
 )
+
+
+def _load_module_from_path(
+    module_name: str,
+    module_path: Path,
+    *,
+    package_root: Path | None = None,
+):
+    kwargs = {}
+    if package_root is not None:
+        kwargs["submodule_search_locations"] = [str(package_root)]
+    spec = importlib.util.spec_from_file_location(module_name, module_path, **kwargs)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        del sys.modules[module_name]
+        raise
+    return module
+
+
+def test_package_entrypoint_loads_via_package_import_path(monkeypatch) -> None:
+    package_root = Path(__file__).resolve().parents[2]
+    module_path = package_root / "__init__.py"
+
+    monkeypatch.chdir(package_root.parent)
+    monkeypatch.delitem(sys.modules, "lora_manager_to_image_saver_hashes", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [entry for entry in sys.path if Path(entry or ".").resolve() != package_root],
+    )
+
+    module = _load_module_from_path(
+        "test_lora_hash_bridge_package",
+        module_path,
+        package_root=package_root,
+    )
+
+    extension = module.comfy_entrypoint()
+    assert type(extension).__name__ == "LoraHashBridgeExtension"
+
+
+def test_import_propagates_non_comfy_api_module_errors(monkeypatch) -> None:
+    module_path = Path(__file__).resolve().parents[2] / "lora_manager_to_image_saver_hashes.py"
+    real_import = builtins.__import__
+
+    def raising_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "comfy_api.v0_0_2":
+            raise ModuleNotFoundError("No module named 'broken_dependency'", name="broken_dependency")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", raising_import)
+
+    with pytest.raises(ModuleNotFoundError, match="broken_dependency"):
+        _load_module_from_path("test_lora_hash_bridge_import_error", module_path)
 
 
 def test_node_schema_exposes_expected_io() -> None:
