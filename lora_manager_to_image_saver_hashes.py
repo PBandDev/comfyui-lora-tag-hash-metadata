@@ -8,6 +8,9 @@ LORA_PATTERN = re.compile(r"<lora:([^:>]+)(?::([^:>]+))?>", re.IGNORECASE)
 def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
     parsed: list[tuple[str, float]] = []
     for name, raw_weight in LORA_PATTERN.findall(value or ""):
+        normalized_name = name.strip()
+        if not normalized_name:
+            continue
         if raw_weight is None or raw_weight == "":
             weight = 1.0
         else:
@@ -17,5 +20,5 @@ def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
                 continue
             if not math.isfinite(weight):
                 continue
-        parsed.append((name.strip(), weight))
+        parsed.append((normalized_name, weight))
     return parsed

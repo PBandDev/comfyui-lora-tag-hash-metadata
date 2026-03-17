@@ -27,3 +27,7 @@ def test_parse_ignores_malformed_loras() -> None:
 
 def test_parse_ignores_non_finite_weights() -> None:
     assert parse_loaded_loras("<lora:foo:nan> <lora:bar:inf> <lora:baz:-inf>") == []
+
+
+def test_parse_ignores_blank_lora_names() -> None:
+    assert parse_loaded_loras("<lora:   :0.8>") == []
