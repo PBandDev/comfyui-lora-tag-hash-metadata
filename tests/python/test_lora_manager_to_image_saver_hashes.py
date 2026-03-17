@@ -8,11 +8,45 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import lora_manager_to_image_saver_hashes as lora_hashes
 
 from lora_manager_to_image_saver_hashes import (
+    LoraManagerToImageSaverHashes,
     build_additional_hashes,
     parse_loaded_loras,
     resolve_lora_path,
     sha256_10,
 )
+
+
+def test_node_schema_exposes_expected_io() -> None:
+    schema = LoraManagerToImageSaverHashes.define_schema()
+
+    assert schema.node_id == "LoraManagerToImageSaverHashes"
+    assert schema.display_name == "LoraManager To Image Saver Hashes"
+    assert schema.category == "ImageSaver/utils"
+    assert [item.name for item in schema.inputs] == ["loaded_loras"]
+    assert [item.name for item in schema.outputs] == [
+        "additional_hashes",
+        "resolved_loras",
+        "missing_loras",
+    ]
+
+
+def test_node_execute_wraps_hash_bridge_logic(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    foo = tmp_path / "foo.safetensors"
+    foo.write_bytes(b"abc")
+
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: ["foo.safetensors"],
+        get_full_path=lambda category, name: str(foo),
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+
+    result = LoraManagerToImageSaverHashes.execute("<lora:foo:0.8> <lora:bar:1.2>")
+
+    expected_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    assert result == (f"foo:{expected_hash}:0.8", "foo", "bar")
 
 
 def test_parse_single_lora() -> None:

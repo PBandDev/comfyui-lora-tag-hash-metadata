@@ -10,6 +10,48 @@ try:
 except ImportError:
     folder_paths = None
 
+try:
+    from comfy_api.v0_0_2 import ComfyExtension, io
+except ImportError:
+    @dataclass(frozen=True)
+    class _CompatStringPort:
+        name: str
+        multiline: bool = False
+
+    class _CompatString:
+        Type = str
+
+        @staticmethod
+        def Input(name: str, multiline: bool = False) -> _CompatStringPort:
+            return _CompatStringPort(name=name, multiline=multiline)
+
+        @staticmethod
+        def Output(name: str) -> _CompatStringPort:
+            return _CompatStringPort(name=name)
+
+    @dataclass(frozen=True)
+    class _CompatSchema:
+        node_id: str
+        display_name: str
+        category: str
+        description: str
+        inputs: list[object]
+        outputs: list[object]
+
+    class _CompatComfyNode:
+        pass
+
+    class _CompatIO:
+        ComfyNode = _CompatComfyNode
+        Schema = _CompatSchema
+        String = _CompatString
+
+    class ComfyExtension:
+        async def get_node_list(self) -> list[type[_CompatComfyNode]]:
+            return []
+
+    io = _CompatIO()
+
 
 LORA_PATTERN = re.compile(r"<lora:([^:>]+)(?::([^:>]+))?>", re.IGNORECASE)
 
@@ -89,3 +131,38 @@ def build_additional_hashes(
         resolved_loras=",".join(resolved_loras),
         missing_loras=",".join(missing_loras),
     )
+
+
+class LoraManagerToImageSaverHashes(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="LoraManagerToImageSaverHashes",
+            display_name="LoraManager To Image Saver Hashes",
+            category="ImageSaver/utils",
+            description="Convert LoraManager loaded_loras text to Image Saver additional_hashes.",
+            inputs=[io.String.Input("loaded_loras", multiline=True)],
+            outputs=[
+                io.String.Output("additional_hashes"),
+                io.String.Output("resolved_loras"),
+                io.String.Output("missing_loras"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, loaded_loras: str) -> tuple[str, str, str]:
+        result = build_additional_hashes(loaded_loras)
+        return (
+            result.additional_hashes,
+            result.resolved_loras,
+            result.missing_loras,
+        )
+
+
+class LoraHashBridgeExtension(ComfyExtension):
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        return [LoraManagerToImageSaverHashes]
+
+
+def comfy_entrypoint() -> ComfyExtension:
+    return LoraHashBridgeExtension()
