@@ -39,3 +39,8 @@ replace = '"version": "{new_version}"'
 filename = "src/index.ts"
 search = 'Version {current_version}'
 replace = 'Version {new_version}'
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

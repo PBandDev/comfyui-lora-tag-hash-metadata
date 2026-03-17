@@ -18,3 +18,4 @@ node.zip
 .changeset/
 docs/plans/
 .worktrees/
+.venv/

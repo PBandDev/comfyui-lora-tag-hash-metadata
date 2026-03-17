@@ -37,6 +37,15 @@ After creating from template, search and replace these values:
 2. Run `pnpm install`
 3. Run `pnpm dev` to watch for changes and rebuild `dist/`
 
+### Python Test Workflow
+
+Use `uv` for Python-side tooling:
+
+```bash
+uv sync
+uv run pytest
+```
+
 ```bash
 pnpm install    # Install dependencies
 pnpm dev        # Watch mode - rebuilds dist/ on change
@@ -45,6 +54,10 @@ pnpm test       # Run tests
 ```
 
 **Note:** Reload ComfyUI frontend (browser refresh) for JS changes. Restart ComfyUI server for Python changes.
+
+## LoRA Tag Hash Metadata
+
+Wire any `<lora:name:weight>` text source into `LoRA Tags To Hash Metadata`, then connect `additional_hashes` to any downstream node that expects `Name:HASH:Weight` metadata, including `Image Saver Metadata.additional_hashes`.
 
 ## Publishing to ComfyUI Registry
 
