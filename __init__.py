@@ -7,8 +7,9 @@ def comfy_entrypoint():
     return module_entrypoint()
 
 WEB_DIRECTORY = "./dist"
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+# Keep legacy exports unset so ComfyUI continues into the V3 comfy_entrypoint path.
+NODE_CLASS_MAPPINGS = None
+NODE_DISPLAY_NAME_MAPPINGS = None
 
 __all__ = [
     "NODE_CLASS_MAPPINGS",

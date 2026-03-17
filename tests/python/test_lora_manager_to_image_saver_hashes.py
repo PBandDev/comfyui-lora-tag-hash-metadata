@@ -131,6 +131,23 @@ def test_package_entrypoint_loads_via_package_import_path(monkeypatch) -> None:
     assert type(extension).__name__ == "LoraHashBridgeExtension"
 
 
+def test_package_disables_legacy_v1_mapping_exports(monkeypatch) -> None:
+    package_root = REPO_ROOT
+    module_path = package_root / "__init__.py"
+
+    _install_fake_comfy_api()
+    monkeypatch.chdir(package_root.parent)
+
+    module = _load_module_from_path(
+        "test_lora_hash_bridge_package_v3_exports",
+        module_path,
+        package_root=package_root,
+    )
+
+    assert module.NODE_CLASS_MAPPINGS is None
+    assert module.NODE_DISPLAY_NAME_MAPPINGS is None
+
+
 def test_import_requires_comfy_api_module() -> None:
     module_path = REPO_ROOT / "lora_manager_to_image_saver_hashes.py"
 
