@@ -1,3 +1,4 @@
+import math
 import re
 
 
@@ -13,6 +14,8 @@ def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
             try:
                 weight = float(raw_weight.strip())
             except ValueError:
+                continue
+            if not math.isfinite(weight):
                 continue
         parsed.append((name.strip(), weight))
     return parsed

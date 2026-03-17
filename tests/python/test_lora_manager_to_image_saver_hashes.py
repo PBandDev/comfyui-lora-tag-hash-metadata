@@ -23,3 +23,7 @@ def test_parse_multiple_loras() -> None:
 
 def test_parse_ignores_malformed_loras() -> None:
     assert parse_loaded_loras("<lora:foo:abc> <lora:bar:0.8:extra>") == []
+
+
+def test_parse_ignores_non_finite_weights() -> None:
+    assert parse_loaded_loras("<lora:foo:nan> <lora:bar:inf> <lora:baz:-inf>") == []
