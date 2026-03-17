@@ -1,17 +1,17 @@
 [project]
-name = "comfyui-custom-node"
-description = "A ComfyUI custom node"
+name = "comfyui-lora-tag-hash-metadata"
+description = "ComfyUI node that converts <lora:name:weight> tags into Name:HASH:Weight metadata strings."
 version = "1.0.0"
 readme = "README.md"
 license = { file = "LICENSE" }
 
 [project.urls]
-Repository = "https://github.com/your-username/comfyui-custom-node"
+Repository = "https://github.com/PBandDev/comfyui-lora-tag-hash-metadata"
 
 [tool.comfy]
-PublisherId = "your-username"
-DisplayName = "My Custom Node"
-Icon = "https://raw.githubusercontent.com/your-username/comfyui-custom-node/main/assets/icon.svg"
+PublisherId = "PBandDev"
+DisplayName = "LoRA Tag Hash Metadata"
+Icon = "https://raw.githubusercontent.com/PBandDev/comfyui-lora-tag-hash-metadata/main/assets/icon.svg"
 requires-comfyui = ">=0.3.0"
 includes = ['dist/']
 

@@ -10,7 +10,7 @@ declare global {
 }
 
 app.registerExtension({
-  name: "ComfyUI My Custom Node",
+  name: "ComfyUI LoRA Tag Hash Metadata",
   settings: [
     {
       id: SETTINGS_IDS.VERSION,
@@ -19,7 +19,7 @@ app.registerExtension({
         const spanEl = document.createElement("span");
         spanEl.insertAdjacentHTML(
           "beforeend",
-          `<a href="https://github.com/your-username/comfyui-custom-node" target="_blank" style="padding-right: 12px;">Homepage</a>`
+          `<a href="https://github.com/PBandDev/comfyui-lora-tag-hash-metadata" target="_blank" style="padding-right: 12px;">Homepage</a>`
         );
 
         return spanEl;

@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "comfyui-custom-node"
+name = "comfyui-lora-tag-hash-metadata"
 version = "1.0.0"
 source = { virtual = "." }
 

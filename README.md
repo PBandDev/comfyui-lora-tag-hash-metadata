@@ -1,35 +1,40 @@
-# ComfyUI Custom Node Template
+# ComfyUI LoRA Tag Hash Metadata
 
-Starter template for building ComfyUI custom nodes with TypeScript frontend. Example use: [ComfyUI Node Organizer](https://github.com/PBandDev/comfyui-node-organizer)
+ComfyUI custom node that converts `<lora:name:weight>` text into `Name:HASH:Weight`
+metadata strings for downstream nodes.
 
-## Quick Start
+Primary use case:
 
-1. Click **"Use this template"** > **"Create a new repository"**
-2. Clone your new repository
-3. Update the placeholders below
-4. Run `pnpm install`
-5. Run `pnpm dev` to start development
+- feed `loaded_loras` from LoRA Manager into `LoRA Tags To Hash Metadata`
+- connect `additional_hashes` into `Image Saver Metadata.additional_hashes`
 
-## Required Updates
+The node is generic on purpose. Any node that outputs `<lora:name:weight>` text can
+feed it, and any downstream node that expects `Name:HASH:Weight` strings can consume
+the result.
 
-After creating from template, search and replace these values:
+## Node
 
-| Search for | Replace with |
-|------------|--------------|
-| `comfyui-custom-node` | Your package slug (e.g., `comfyui-my-feature`) |
-| `My Custom Node` | Your display name (e.g., `My Feature`) |
-| `A ComfyUI custom node` | Your description |
-| `Your Name` | Your name |
-| `your-username` | Your GitHub/ComfyUI registry username |
+- Node id: `LoraTagsToHashMetadata`
+- Display name: `LoRA Tags To Hash Metadata`
+- Category: `utils/metadata`
 
-### Files to update
+Inputs:
 
-- `package.json` - name, description, author
-- `pyproject.toml` - name, description, URLs, PublisherId, DisplayName, Icon
-- `src/constants.ts` - SETTINGS_PREFIX
-- `src/index.ts` - extension name, homepage URL
-- `assets/icon.svg` - replace with your icon
-- `LICENSE` - update copyright holder
+- `loaded_loras`: multiline string containing one or more `<lora:name:weight>` tags
+
+Outputs:
+
+- `additional_hashes`: comma-separated `Name:HASH:Weight` string
+- `resolved_loras`: comma-separated list of successfully resolved LoRA names
+- `missing_loras`: comma-separated list of unresolved or incompatible names
+
+Behavior:
+
+- supports `<lora:name>` and defaults weight to `1.0`
+- resolves path-qualified names before basename fallback
+- computes SHA256 locally and emits the first 10 uppercase hex characters
+- deduplicates repeated tags with last occurrence winning
+- reports comma-bearing names in `missing_loras` instead of silently dropping them
 
 ## Development
 
@@ -57,7 +62,15 @@ pnpm test       # Run tests
 
 ## LoRA Tag Hash Metadata
 
-Wire any `<lora:name:weight>` text source into `LoRA Tags To Hash Metadata`, then connect `additional_hashes` to any downstream node that expects `Name:HASH:Weight` metadata, including `Image Saver Metadata.additional_hashes`.
+Typical wiring:
+
+```text
+Lora Loader (LoraManager).loaded_loras
+  -> LoRA Tags To Hash Metadata.loaded_loras
+  -> Image Saver Metadata.additional_hashes
+```
+
+You can also feed any other text source that emits the same tag syntax.
 
 ## Publishing to ComfyUI Registry
 

@@ -1,7 +1,7 @@
 {
-  "name": "comfyui-custom-node",
+  "name": "comfyui-lora-tag-hash-metadata",
   "version": "1.0.0",
-  "description": "A ComfyUI custom node",
+  "description": "ComfyUI node that converts <lora:name:weight> tags into Name:HASH:Weight metadata strings.",
   "type": "module",
   "scripts": {
     "dev": "tsc && vite build --watch",
@@ -16,7 +16,7 @@
     "custom node",
     "extension"
   ],
-  "author": "Your Name",
+  "author": "PBandDev",
   "license": "MIT",
   "packageManager": "pnpm@10.17.1",
   "dependencies": {
