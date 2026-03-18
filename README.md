@@ -3,6 +3,8 @@
 ComfyUI custom node that converts `<lora:name:weight>` text into `Name:HASH:Weight`
 metadata strings for downstream nodes such as Civitai-aware metadata savers.
 
+Created with [comfyui-custom-node-template](https://github.com/PBandDev/comfyui-custom-node-template)
+
 Primary use case:
 
 - feed `loaded_loras` from LoRA Manager into `LoRA Tags To Hash Metadata`
