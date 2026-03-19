@@ -15,6 +15,22 @@ The node is generic on purpose. Any node that outputs `<lora:name:weight>` text 
 feed it, and any downstream node that expects `Name:HASH:Weight` strings can consume
 the result.
 
+## Install
+
+### ComfyUI Manager
+
+1. Open **Manager** in ComfyUI
+2. Click **Install Custom Nodes**
+3. Search for `LoRA Tag Hash Metadata` or `comfyui-lora-tag-hash-metadata`
+4. Click **Install**
+5. Restart ComfyUI if Manager prompts you to do so
+
+If you use the ComfyUI CLI instead of the Manager UI:
+
+```bash
+comfy node install comfyui-lora-tag-hash-metadata
+```
+
 ## Node
 
 - Node id: `LoraTagsToHashMetadata`
@@ -39,7 +55,7 @@ Behavior:
 - deduplicates repeated tags with last occurrence winning
 - reports comma-bearing names in `missing_loras` instead of silently dropping them
 
-## Development
+## Local Development
 
 1. Clone/symlink this folder into ComfyUI's `custom_nodes/` directory
 2. Run `pnpm install`
