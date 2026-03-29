@@ -108,6 +108,12 @@ resolve_lora_path = lora_hashes.resolve_lora_path
 sha256_10 = lora_hashes.sha256_10
 
 
+def _normalize_lora_reference(name: str) -> str:
+    helper = getattr(lora_hashes, "normalize_lora_reference", None)
+    assert helper is not None
+    return helper(name)
+
+
 def test_package_entrypoint_loads_via_package_import_path(monkeypatch) -> None:
     package_root = REPO_ROOT
     module_path = package_root / "__init__.py"
@@ -249,6 +255,71 @@ def test_resolve_lora_path_prefers_exact_relative_path_before_stem(monkeypatch) 
     assert resolve_lora_path("nested/foo") == "C:/ComfyUI/models/loras/nested/foo.safetensors"
 
 
+def test_resolve_lora_path_matches_basename_with_dotted_version_suffix(monkeypatch) -> None:
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: [
+            "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors",
+        ],
+        get_full_path=lambda category, name: f"C:/ComfyUI/models/loras/{name}",
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+
+    assert resolve_lora_path("anima_preview2_rdbt_finetuned_cfg_distilled_v0.23") == (
+        "C:/ComfyUI/models/loras/Anima/base model/"
+        "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors"
+    )
+
+
+def test_resolve_lora_path_matches_relative_path_with_dotted_version_suffix(
+    monkeypatch,
+) -> None:
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: [
+            "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors",
+            "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.24.safetensors",
+        ],
+        get_full_path=lambda category, name: f"C:/ComfyUI/models/loras/{name}",
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+
+    assert resolve_lora_path(
+        "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23"
+    ) == (
+        "C:/ComfyUI/models/loras/Anima/base model/"
+        "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors"
+    )
+
+
+def test_resolve_lora_path_still_matches_simple_name_without_extension(monkeypatch) -> None:
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: ["nested/foo.safetensors"],
+        get_full_path=lambda category, name: f"C:/ComfyUI/models/loras/{name}",
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+
+    assert resolve_lora_path("foo") == "C:/ComfyUI/models/loras/nested/foo.safetensors"
+
+
+def test_resolve_lora_path_prefers_exact_relative_match_over_basename_fallback_with_versions(
+    monkeypatch,
+) -> None:
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: [
+            "Other/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors",
+            "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors",
+        ],
+        get_full_path=lambda category, name: f"C:/ComfyUI/models/loras/{name}",
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+
+    assert resolve_lora_path(
+        "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23"
+    ) == (
+        "C:/ComfyUI/models/loras/Anima/base model/"
+        "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors"
+    )
+
+
 def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) -> None:
     existing = tmp_path / "foo.safetensors"
     existing.write_bytes(b"abc")
@@ -264,6 +335,28 @@ def test_build_additional_hashes_skips_missing_and_reports_them(tmp_path: Path) 
     assert result.additional_hashes == f"foo:{expected_hash}:0.8"
     assert result.resolved_loras == "foo"
     assert result.missing_loras == "bar"
+
+
+def test_build_additional_hashes_resolves_dotted_version_lora_name(tmp_path: Path) -> None:
+    target = tmp_path / "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors"
+    target.write_bytes(b"anima")
+
+    def resolver(name: str) -> str | None:
+        if name == "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23":
+            return str(target)
+        return None
+
+    result = build_additional_hashes(
+        "<lora:anima_preview2_rdbt_finetuned_cfg_distilled_v0.23:1>",
+        resolver,
+    )
+
+    expected_hash = hashlib.sha256(b"anima").hexdigest().upper()[:10]
+    assert result.additional_hashes == (
+        f"anima_preview2_rdbt_finetuned_cfg_distilled_v0.23:{expected_hash}:1.0"
+    )
+    assert result.resolved_loras == "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23"
+    assert result.missing_loras == ""
 
 
 def test_build_additional_hashes_reports_comma_bearing_names_as_missing(
@@ -314,6 +407,44 @@ def test_build_additional_hashes_uses_last_duplicate_and_joins_resolved_entries(
     assert result.additional_hashes == f"bar:{bar_hash}:1.2,foo:{foo_hash}:0.5"
     assert result.resolved_loras == "bar,foo"
     assert result.missing_loras == ""
+
+
+def test_execute_resolves_actual_loaded_loras_shape_with_dotted_version(
+    monkeypatch,
+) -> None:
+    folder_paths = types.SimpleNamespace(
+        get_filename_list=lambda category: [
+            "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors",
+        ],
+        get_full_path=lambda category, name: f"C:/ComfyUI/models/loras/{name}",
+    )
+    monkeypatch.setattr(lora_hashes, "folder_paths", folder_paths, raising=False)
+    monkeypatch.setattr(
+        lora_hashes,
+        "sha256_10",
+        lambda path: "F7180E92E5",
+        raising=False,
+    )
+
+    assert LoraManagerToImageSaverHashes.execute(
+        "<lora:anima_preview2_rdbt_finetuned_cfg_distilled_v0.23:1>"
+    ) == (
+        "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23:F7180E92E5:1.0",
+        "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23",
+        "",
+    )
+
+
+def test_normalize_lora_reference_preserves_dotted_version_without_known_extension() -> None:
+    assert _normalize_lora_reference("anima_preview2_rdbt_finetuned_cfg_distilled_v0.23") == (
+        "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23"
+    )
+
+
+def test_normalize_lora_reference_strips_known_model_extension_only() -> None:
+    assert _normalize_lora_reference(
+        "Anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors"
+    ) == "anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23"
 
 
 def test_sha256_10_hashes_without_path_read_bytes(

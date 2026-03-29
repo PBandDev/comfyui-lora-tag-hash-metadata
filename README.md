@@ -51,9 +51,16 @@ Behavior:
 
 - supports `<lora:name>` and defaults weight to `1.0`
 - resolves path-qualified names before basename fallback
+- treats dotted version suffixes such as `my_lora_v0.23` as part of the LoRA name unless a known model extension is present
 - computes SHA256 locally and emits the first 10 uppercase hex characters
 - deduplicates repeated tags with last occurrence winning
 - reports comma-bearing names in `missing_loras` instead of silently dropping them
+
+## Troubleshooting
+
+### LoRA appears in `missing_loras` even though the file exists
+
+This node resolves names against ComfyUI's `loras` model paths. Dotted version suffixes such as `my_lora_v0.23` are treated as valid LoRA names, not file extensions, so tags like `<lora:anima_preview2_rdbt_finetuned_cfg_distilled_v0.23:1>` should resolve to files such as `anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors`.
 
 ## Local Development
 

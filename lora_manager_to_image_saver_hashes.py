@@ -14,6 +14,13 @@ from comfy_api.v0_0_2 import ComfyExtension, io
 
 
 LORA_PATTERN = re.compile(r"<lora:([^:>]+)(?::([^:>]+))?>", re.IGNORECASE)
+KNOWN_LORA_EXTENSIONS = (
+    ".safetensors",
+    ".ckpt",
+    ".pth",
+    ".pt",
+    ".bin",
+)
 
 
 @dataclass(frozen=True)
@@ -50,27 +57,39 @@ def sha256_10(path: str) -> str:
     return hasher.hexdigest().upper()[:10]
 
 
+def normalize_lora_reference(name: str) -> str:
+    normalized = PurePosixPath(name.replace("\\", "/")).as_posix().strip().lower()
+    for extension in KNOWN_LORA_EXTENSIONS:
+        if normalized.endswith(extension):
+            return normalized[: -len(extension)]
+    return normalized
+
+
 def resolve_lora_path(name: str) -> str | None:
     if folder_paths is None:
         return None
 
     filenames = folder_paths.get_filename_list("loras")
-    requested = PurePosixPath(name.replace("\\", "/"))
-    requested_full = requested.as_posix().lower()
-    requested_no_ext = requested.with_suffix("").as_posix().lower()
+    requested_full = PurePosixPath(name.replace("\\", "/")).as_posix().strip().lower()
+    requested_normalized = normalize_lora_reference(name)
+    requested_basename = PurePosixPath(requested_normalized).name
     basename_matches: list[str] = []
 
     for candidate in filenames:
-        candidate_path = PurePosixPath(str(candidate).replace("\\", "/"))
-        candidate_full = candidate_path.as_posix().lower()
-        candidate_no_ext = candidate_path.with_suffix("").as_posix().lower()
-        if candidate_full == requested_full or candidate_no_ext == requested_no_ext:
+        candidate_text = str(candidate).replace("\\", "/")
+        candidate_full = PurePosixPath(candidate_text).as_posix().lower()
+        candidate_normalized = normalize_lora_reference(candidate_text)
+        candidate_basename = PurePosixPath(candidate_normalized).name
+
+        if candidate_full == requested_full or candidate_normalized == requested_normalized:
             return folder_paths.get_full_path("loras", candidate)
-        if candidate_path.stem.lower() == requested.stem.lower():
+        if candidate_basename == requested_basename:
             basename_matches.append(candidate)
 
     for candidate in basename_matches:
-        if Path(candidate).stem.lower() == requested.stem.lower():
+        candidate_text = str(candidate).replace("\\", "/")
+        candidate_basename = PurePosixPath(normalize_lora_reference(candidate_text)).name
+        if candidate_basename == requested_basename:
             return folder_paths.get_full_path("loras", candidate)
     return None
 
