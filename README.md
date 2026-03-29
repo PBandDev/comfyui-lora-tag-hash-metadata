@@ -56,12 +56,6 @@ Behavior:
 - deduplicates repeated tags with last occurrence winning
 - reports comma-bearing names in `missing_loras` instead of silently dropping them
 
-## Troubleshooting
-
-### LoRA appears in `missing_loras` even though the file exists
-
-This node resolves names against ComfyUI's `loras` model paths. Dotted version suffixes such as `my_lora_v0.23` are treated as valid LoRA names, not file extensions, so tags like `<lora:anima_preview2_rdbt_finetuned_cfg_distilled_v0.23:1>` should resolve to files such as `anima_preview2_rdbt_finetuned_cfg_distilled_v0.23.safetensors`.
-
 ## Local Development
 
 1. Clone/symlink this folder into ComfyUI's `custom_nodes/` directory
