@@ -26,6 +26,7 @@ const WIDGET_MAX_HEIGHT = 320;
 
 interface StatusMessage {
   civitai_resources_status?: string[];
+  civitai_resources_input?: string[];
 }
 
 interface TextWidgetLike {
@@ -68,6 +69,7 @@ const statusHosts = new WeakMap<StatusNodeLike, HTMLDivElement>();
 const pickerClosers = new WeakMap<StatusNodeLike, () => void>();
 const previewSeqs = new WeakMap<StatusNodeLike, number>();
 const previewControllers = new WeakMap<StatusNodeLike, AbortController>();
+const configureTimers = new WeakMap<StatusNodeLike, ReturnType<typeof setTimeout>>();
 
 function resourceTextWidget(node: StatusNodeLike): TextWidgetLike | undefined {
   return node.widgets?.find((widget) => widget.name === "civitai_resources");
@@ -221,6 +223,14 @@ app.registerExtension({
     proto.onRemoved = function (this: StatusNodeLike) {
       pickerClosers.get(this)?.();
       pickerClosers.delete(this);
+      // Kill the deferred configure preview too, or removing a freshly
+      // loaded node lets the timer resurrect a request (and DOM widget).
+      const timer = configureTimers.get(this);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        configureTimers.delete(this);
+      }
+      previewSeqs.set(this, (previewSeqs.get(this) ?? 0) + 1);
       previewControllers.get(this)?.abort();
       originalRemoved?.call(this);
     };
@@ -229,7 +239,11 @@ app.registerExtension({
       originalConfigure?.call(this, info);
       // Widget values land during configure — preview on the next tick so a
       // loaded workflow shows its resources without queueing.
-      setTimeout(() => void refreshPreview(this), 0);
+      const timer = setTimeout(() => {
+        configureTimers.delete(this);
+        void refreshPreview(this);
+      }, 0);
+      configureTimers.set(this, timer);
     };
     const originalExecuted = proto.onExecuted;
     proto.onExecuted = function (this: StatusNodeLike, message: StatusMessage) {
@@ -239,8 +253,15 @@ app.registerExtension({
       if (host === null) {
         return;
       }
-      // Executed payload is authoritative — cancel any in-flight preview so a
-      // slow response can't overwrite the run's rows.
+      // A run is only authoritative for the textbox it resolved — if the user
+      // edited while it was queued, preview the current text instead.
+      const executedInput = message.civitai_resources_input?.[0];
+      const currentText = String(resourceTextWidget(this)?.value ?? "");
+      if (executedInput !== undefined && executedInput !== currentText) {
+        void refreshPreview(this);
+        return;
+      }
+      // Executed payload wins over any in-flight preview of the same text.
       previewSeqs.set(this, (previewSeqs.get(this) ?? 0) + 1);
       previewControllers.get(this)?.abort();
       host.replaceChildren(buildStatusList(parseStatusPayload(payload), statusOptionsFor(this)));

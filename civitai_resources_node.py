@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import json
 import math
@@ -66,6 +67,17 @@ class ResourceLine:
     error: str | None = None
 
 
+# civitai ids fit comfortably in 12 digits; longer digit runs would trip
+# CPython's int-conversion limit (default 4300 digits) and are junk anyway.
+MAX_ID_DIGITS = 12
+
+
+def _parse_id(value: str | None) -> int | None:
+    if value is None or not value.isdigit() or len(value) > MAX_ID_DIGITS:
+        return None
+    return int(value)
+
+
 def parse_resource_lines(text: str) -> list[ResourceLine]:
     lines: list[ResourceLine] = []
     for raw in (text or "").splitlines():
@@ -89,25 +101,36 @@ def parse_resource_lines(text: str) -> list[ResourceLine]:
         if (url_match := URL_RE.match(body)) is not None:
             query = parse_qs(urlsplit(body).query)
             version_raw = (query.get("modelVersionId") or [None])[0]
+            model_id = _parse_id(url_match.group(1))
+            if model_id is None:
+                lines.append(
+                    ResourceLine(raw=stripped, kind="invalid", error="model id out of range")
+                )
+                continue
             lines.append(
                 ResourceLine(
                     raw=stripped,
                     kind="url",
-                    model_id=int(url_match.group(1)),
-                    version_id=int(version_raw)
-                    if version_raw is not None and version_raw.isdigit()
-                    else None,
+                    model_id=model_id,
+                    version_id=_parse_id(version_raw),
                     weight=weight,
                 )
             )
         elif (air_match := AIR_RE.match(body)) is not None:
+            air_model_id = _parse_id(air_match.group(1))
+            air_version_id = _parse_id(air_match.group(2))
+            if air_model_id is None or air_version_id is None:
+                lines.append(
+                    ResourceLine(raw=stripped, kind="invalid", error="air id out of range")
+                )
+                continue
             lines.append(
                 ResourceLine(
                     raw=stripped,
                     kind="air",
-                    model_id=int(air_match.group(1)),
-                    version_id=int(air_match.group(2)),
-                    file_id=int(air_match.group(3)) if air_match.group(3) else None,
+                    model_id=air_model_id,
+                    version_id=air_version_id,
+                    file_id=_parse_id(air_match.group(3)),
                     weight=weight,
                 )
             )
@@ -485,6 +508,31 @@ def preview_resources_json(
     return build_resource_report("", civitai_resources, cache=cache, fetch=fetch).resources_json
 
 
+# The preview endpoint is local-only but every parseable line can fan out into
+# civitai requests — bound the body before any resolution happens.
+PREVIEW_MAX_BYTES = 64 * 1024
+PREVIEW_MAX_LINES = 200
+PREVIEW_MAX_PENDING = 4
+
+
+def _parse_preview_body(raw: bytes) -> str | None:
+    """Validated text from a /clth/preview body, or None to reject (400)."""
+    if len(raw) > PREVIEW_MAX_BYTES:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    text = data.get("text")
+    if not isinstance(text, str):
+        return None
+    if len(text.splitlines()) > PREVIEW_MAX_LINES:
+        return None
+    return text
+
+
 class CivitaiResourcesToHashMetadata(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -525,7 +573,12 @@ class CivitaiResourcesToHashMetadata(io.ComfyNode):
             report.resolved,
             report.missing,
             report.resources_json,
-            ui={"civitai_resources_status": [report.resources_json]},
+            ui={
+                "civitai_resources_status": [report.resources_json],
+                # Frontend staleness guard: a run that resolved an older
+                # textbox must not overwrite the preview of the current one.
+                "civitai_resources_input": [civitai_resources],
+            },
         )
 
 
@@ -536,15 +589,29 @@ def _register_preview_route() -> None:
     except Exception:
         return
 
+    # Dedicated single worker: previews never occupy ComfyUI's shared default
+    # executor, serialize cache writes, and excess requests get a fast 429
+    # instead of stacking urllib retries. Aborted browser fetches can't cancel
+    # a running thread — bounding here is the real backpressure.
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clth-preview")
+    pending = 0
+
     @PromptServer.instance.routes.post("/clth/preview")
     async def clth_preview(request):
+        nonlocal pending
+        if request.content_length is not None and request.content_length > PREVIEW_MAX_BYTES:
+            return web.Response(status=413, text="preview body too large")
+        text = _parse_preview_body(await request.read())
+        if text is None:
+            return web.Response(status=400, text="invalid preview request")
+        if pending >= PREVIEW_MAX_PENDING:
+            return web.Response(status=429, text="preview busy")
+        pending += 1
         try:
-            data = await request.json()
-        except Exception:
-            data = {}
-        text = str(data.get("text", "")) if isinstance(data, dict) else ""
-        loop = asyncio.get_running_loop()
-        payload = await loop.run_in_executor(None, preview_resources_json, text)
+            loop = asyncio.get_running_loop()
+            payload = await loop.run_in_executor(executor, preview_resources_json, text)
+        finally:
+            pending -= 1
         return web.Response(text=payload, content_type="application/json")
 
 

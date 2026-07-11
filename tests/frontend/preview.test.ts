@@ -24,7 +24,7 @@ describe("fetchPreview", () => {
     vi.stubGlobal("fetch", spy);
     const entries = await fetchPreview("CD64AF8696\n", new AbortController().signal);
     const [input, init] = spy.mock.calls[0];
-    expect(String(input)).toBe("/clth/preview");
+    expect(String(input)).toBe("/api/clth/preview");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({ text: "CD64AF8696\n" });
     expect(entries).toHaveLength(1);

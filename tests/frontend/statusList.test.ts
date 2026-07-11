@@ -124,6 +124,12 @@ describe("buildStatusList", () => {
     expect(el.querySelector(".clth-note")?.textContent).toContain("preview");
     expect(buildStatusList(entries).querySelector(".clth-note")).toBeNull();
   });
+
+  it("keeps the note on empty renders (comment-only preview)", () => {
+    const el = buildStatusList([], { note: "preview — queue a prompt to finalize" });
+    expect(el.querySelector(".clth-note")?.textContent).toContain("preview");
+    expect(el.querySelector(".clth-empty")).not.toBeNull();
+  });
 });
 
 describe("parseStatusPayload", () => {

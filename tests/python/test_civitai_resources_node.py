@@ -563,7 +563,10 @@ def test_v2_execute_returns_ui_payload(tmp_path: Path, monkeypatch) -> None:
     payload = json.loads(resources_json)
     assert len(payload) == 1
     assert payload[0]["status"] == "missing"
-    assert output.ui == {"civitai_resources_status": [resources_json]}
+    assert output.ui == {
+        "civitai_resources_status": [resources_json],
+        "civitai_resources_input": ["not a url"],
+    }
 
 
 def test_build_report_soft_fails_and_escapes_missing(tmp_path: Path) -> None:
@@ -632,3 +635,36 @@ def test_preview_resources_json_reports_missing(tmp_path: Path) -> None:
     assert len(payload) == 1
     assert payload[0]["status"] == "missing"
     assert payload[0]["source"] == url_line
+
+
+def test_parse_rejects_oversized_ids_softly() -> None:
+    huge = "9" * 5000  # would trip CPython's 4300-digit int-conversion limit
+    lines = parse_resource_lines(
+        f"https://civitai.com/models/{huge}\n"
+        f"urn:air:sdxl:lora:civitai:{huge}@123\n"
+        f"https://civitai.com/models/2767064?modelVersionId={huge}\n"
+    )
+    assert [line.kind for line in lines] == ["invalid", "invalid", "url"]
+    assert lines[2].version_id is None  # junk pin ignored, url stays unpinned
+
+
+def test_parse_preview_body_validation() -> None:
+    ok = json.dumps({"text": "CD64AF8696"}).encode("utf-8")
+    assert cnode._parse_preview_body(ok) == "CD64AF8696"
+    assert cnode._parse_preview_body(b"not json") is None
+    assert cnode._parse_preview_body(b'["text"]') is None
+    assert cnode._parse_preview_body(b'{"text": 5}') is None
+    assert cnode._parse_preview_body(b"\xff\xfe") is None
+    too_many_lines = json.dumps({"text": "\n" * (cnode.PREVIEW_MAX_LINES + 1)}).encode("utf-8")
+    assert cnode._parse_preview_body(too_many_lines) is None
+    assert cnode._parse_preview_body(b" " * (cnode.PREVIEW_MAX_BYTES + 1)) is None
+
+
+def test_execute_ui_echoes_textbox_input(monkeypatch) -> None:
+    report = cnode.ResourceReport(
+        additional_hashes="", resolved="", missing="", resources_json="[]"
+    )
+    monkeypatch.setattr(cnode, "build_resource_report", lambda *args, **kwargs: report)
+    out = cnode.CivitaiResourcesToHashMetadata.execute(civitai_resources="THE TEXT")
+    assert out.ui["civitai_resources_input"] == ["THE TEXT"]
+    assert out.ui["civitai_resources_status"] == ["[]"]

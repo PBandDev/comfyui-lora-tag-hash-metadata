@@ -283,11 +283,13 @@ export function buildStatusList(
     empty.className = "clth-empty";
     empty.textContent = "No resources resolved yet — queue a prompt.";
     root.appendChild(empty);
-    return root;
+  } else {
+    for (const entry of entries) {
+      root.appendChild(buildRow(entry, options));
+    }
   }
-  for (const entry of entries) {
-    root.appendChild(buildRow(entry, options));
-  }
+  // The note also applies to empty renders — a comment-only preview must not
+  // masquerade as a run result.
   if (options.note !== undefined) {
     const note = document.createElement("div");
     note.className = "clth-note";

@@ -5,7 +5,9 @@
 import { type ResourceEntry, parseStatusPayload } from "./statusList";
 
 export async function fetchPreview(text: string, signal: AbortSignal): Promise<ResourceEntry[]> {
-  const response = await fetch("/clth/preview", {
+  // "/api"-prefixed alias: works behind the Comfy frontend dev proxy and
+  // API-only reverse proxies (same pattern as the /api/lm/* calls).
+  const response = await fetch("/api/clth/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),

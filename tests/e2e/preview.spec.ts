@@ -11,7 +11,10 @@ interface NodeLike {
 }
 
 interface PreviewWindow {
-  app?: { graph?: { add(node: NodeLike): void; clear(): void } };
+  app?: {
+    graph?: { add(node: NodeLike): void; clear(): void; serialize?(): object };
+    loadGraphData?(data: object): Promise<void> | void;
+  };
   LiteGraph: { createNode(type: string): NodeLike | null };
   __previewNode?: NodeLike;
 }
@@ -95,13 +98,27 @@ test("picker apply updates the status list immediately", async ({ page }) => {
   await expect(page.locator(".clth-row").first()).toContainText("Anima Detailer");
 });
 
-test("reloading the page restores the status list from the saved graph", async ({ page }) => {
+test("loading a saved workflow re-renders the status list", async ({ page }) => {
   await freshNodeWithText(page, PINNED_LINE);
   await page.locator(".clth-refresh").click();
   await expect(page.locator(".clth-row").first()).toBeVisible({ timeout: 30_000 });
 
-  // ComfyUI persists the unsaved workflow; onConfigure must re-preview it.
-  await page.reload();
+  // Serialize the graph, hard-navigate to a blank slate, load the data back —
+  // deterministic onConfigure without depending on the autosave debounce.
+  const graph = await page.evaluate(() => {
+    const win = window as object as PreviewWindow;
+    return win.app?.graph?.serialize?.() ?? null;
+  });
+  expect(graph).not.toBeNull();
+  await page.goto("/");
+  await page.waitForFunction(() => {
+    const win = window as object as PreviewWindow;
+    return win.app?.loadGraphData !== undefined;
+  });
+  await page.evaluate(async (data) => {
+    const win = window as object as PreviewWindow;
+    await win.app?.loadGraphData?.(data);
+  }, graph as object);
   await expect(page.locator(".clth-row").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".clth-row").first()).toContainText("Anima Detailer");
 });
