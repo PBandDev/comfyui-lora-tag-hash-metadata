@@ -59,4 +59,14 @@ test("status list renders success and failure rows", async ({ page }) => {
     "href",
     "https://civitai.com/models/2767064?modelVersionId=3114726",
   );
+  // The resolved entry carries a civitai preview thumbnail.
+  await expect(list.locator("[data-status='resolved'] img")).toHaveCount(1);
+
+  // The widget must stay inside the node: the host is the scroll container.
+  const bounded = await page.evaluate(() => {
+    const host = document.querySelector<HTMLDivElement>(".clth-host");
+    if (host === null) return false;
+    return host.clientHeight <= 320 && host.scrollHeight >= host.clientHeight;
+  });
+  expect(bounded).toBe(true);
 });

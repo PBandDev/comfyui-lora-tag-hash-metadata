@@ -67,6 +67,37 @@ describe("buildStatusList", () => {
     expect(el.textContent).toContain("⚠");
     expect(el.textContent).toContain("30-entry");
   });
+
+  it("renders a thumbnail image when present, glyph placeholder otherwise", () => {
+    const withThumb = buildStatusList([
+      { ...entries[0], thumbnail: "https://image.civitai.com/x/width=96,anim=false/1.jpeg" },
+    ]);
+    const img = withThumb.querySelector("img");
+    expect(img?.src).toContain("width=96");
+    expect(img?.classList.contains("clth-blur")).toBe(false);
+
+    const withoutThumb = buildStatusList(entries);
+    expect(withoutThumb.querySelector("img")).toBeNull();
+    expect(withoutThumb.querySelector(".clth-thumb-glyph")?.textContent).toBe("L");
+  });
+
+  it("blurs thumbnails above the nsfw threshold", () => {
+    const el = buildStatusList([
+      { ...entries[0], thumbnail: "https://image.civitai.com/x/width=96/1.jpeg", nsfw_level: 8 },
+    ]);
+    expect(el.querySelector("img")?.classList.contains("clth-blur")).toBe(true);
+  });
+
+  it("does not link missing rows", () => {
+    const el = buildStatusList([{ ...entries[1], model_id: 999999999 }]);
+    expect(el.querySelector("a")).toBeNull();
+  });
+
+  it("injects the stylesheet once", () => {
+    buildStatusList(entries);
+    buildStatusList(entries);
+    expect(document.querySelectorAll("#clth-status-styles-v1").length).toBe(1);
+  });
 });
 
 describe("parseStatusPayload", () => {

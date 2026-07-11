@@ -72,8 +72,14 @@ Outputs:
 
 Behavior:
 
-- in-node status list after each run: ✓ resolved (with civitai link, type and
-  version), ≡ duplicate, ✗ failed (with reason)
+- in-node status list after each run: card rows with a preview thumbnail
+  (civitai preview for URL/hash/AIR entries, local sidecar preview via
+  ComfyUI's stock model-preview route for loras), name linked to civitai,
+  type · version subline, and a status accent (green resolved / amber
+  duplicate / red failed with reason); NSFW previews (level > PG-13) render
+  blurred
+- the list is capped at ~320px and scrolls inside the node — it never
+  overflows the node bounds
 - executes standalone (output node) — no downstream saver needed to check
   your list
 - persistent on-disk cache under ComfyUI's user directory: version- and

@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 try:
     import folder_paths
@@ -35,6 +35,12 @@ FETCH_BREAKER_LIMIT = 2
 # Image Saver's parse_manual_hashes silently ignores entries past 30.
 IMAGE_SAVER_MANUAL_CAP = 30
 AUTOV2_RE = re.compile(r"^[0-9A-F]{10}$")
+# civitai image urls carry a transform directive segment right before the
+# filename (e.g. /original=true/ or /width=450/) — swap it for a thumbnail.
+THUMBNAIL_TRANSFORM_RE = re.compile(r"/(?:original=true|width=\d+)[^/]*/")
+THUMBNAIL_TRANSFORM = "/width=96,anim=false/"
+# nsfwLevel bitmask: 1=PG, 2=PG13, 4=R, 8=X, 16=XXX, 32=Blocked.
+NSFW_SAFE_MAX = 2
 
 URL_RE = re.compile(
     r"^https?://(?:www\.)?civitai\.(?:com|red|green)/models/(\d+)(?:/[^\s?]*)?(?:\?\S*)?$",
@@ -222,10 +228,54 @@ class ResolvedResource:
     version_id: int | None = None
     version_name: str = ""
     unverified: bool = False
+    thumbnail: str | None = None
+    nsfw_level: int | None = None
 
     @property
     def weight(self) -> float | None:
         return self.line.weight
+
+
+def _thumbnail_from_images(images: object) -> tuple[str | None, int | None]:
+    """Pick the safest preview image and rewrite it to a ~96px thumbnail url."""
+    if not isinstance(images, list):
+        return (None, None)
+    candidates = [
+        image
+        for image in images
+        if isinstance(image, dict) and isinstance(image.get("url"), str)
+    ]
+    if not candidates:
+        return (None, None)
+    safe = [
+        image
+        for image in candidates
+        if isinstance(image.get("nsfwLevel"), int) and image["nsfwLevel"] <= NSFW_SAFE_MAX
+    ]
+    chosen = (safe or candidates)[0]
+    url = THUMBNAIL_TRANSFORM_RE.sub(THUMBNAIL_TRANSFORM, chosen["url"], count=1)
+    level = chosen.get("nsfwLevel")
+    return (url, level if isinstance(level, int) else None)
+
+
+def _local_lora_thumbnail(full_path: str) -> str | None:
+    """Stock ComfyUI serves model-folder sidecar previews at
+    /experiment/models/preview/loras/{path_index}/{relative path}."""
+    if folder_paths is None or not hasattr(folder_paths, "get_folder_paths"):
+        return None
+    try:
+        bases = folder_paths.get_folder_paths("loras")
+    except (KeyError, ValueError):
+        return None
+    resolved = Path(full_path).resolve()
+    for index, base in enumerate(bases):
+        try:
+            relative = resolved.relative_to(Path(base).resolve())
+        except ValueError:
+            continue
+        relative_posix = "/".join(relative.parts)
+        return f"/experiment/models/preview/loras/{index}/{quote(relative_posix)}"
+    return None
 
 
 def _file_autov2(file_entry: object) -> str | None:
@@ -258,6 +308,7 @@ def _from_version_payload(line: ResourceLine, data: dict) -> ResolvedResource:
     model = data.get("model")
     if not isinstance(model, dict):
         model = {}
+    thumbnail, nsfw_level = _thumbnail_from_images(data.get("images"))
     return ResolvedResource(
         line=line,
         name=str(model.get("name") or "").strip(),
@@ -266,6 +317,8 @@ def _from_version_payload(line: ResourceLine, data: dict) -> ResolvedResource:
         model_id=data.get("modelId") or line.model_id,
         version_id=data.get("id"),
         version_name=str(data.get("name") or ""),
+        thumbnail=thumbnail,
+        nsfw_level=nsfw_level,
     )
 
 
@@ -310,6 +363,7 @@ def resolve_line(line: ResourceLine, cache: ResolveCache, fetch=default_fetch) -
     latest = versions[0]
     if not isinstance(latest, dict):
         raise ResolveError("unexpected civitai api payload")
+    thumbnail, nsfw_level = _thumbnail_from_images(latest.get("images"))
     return ResolvedResource(
         line=line,
         name=str(cached.get("name") or "").strip(),
@@ -318,6 +372,8 @@ def resolve_line(line: ResourceLine, cache: ResolveCache, fetch=default_fetch) -
         model_id=cached.get("id"),
         version_id=latest.get("id"),
         version_name=str(latest.get("name") or ""),
+        thumbnail=thumbnail,
+        nsfw_level=nsfw_level,
     )
 
 
@@ -358,10 +414,17 @@ def build_resource_report(
     cache: ResolveCache | None = None,
     fetch=None,
 ) -> ResourceReport:
-    from_v1 = build_additional_hashes(loaded_loras or "", lora_resolver or resolve_lora_path)
+    resolver = lora_resolver or resolve_lora_path
+    from_v1 = build_additional_hashes(loaded_loras or "", resolver)
     cache = cache if cache is not None else ResolveCache()
     fetch = fetch if fetch is not None else default_fetch
     entries: list[dict] = [dict(entry) for entry in from_v1.entries]
+    for entry in entries:
+        if entry.get("status") != "resolved":
+            continue
+        lora_path = resolver(str(entry.get("name") or ""))
+        if lora_path:
+            entry["thumbnail"] = _local_lora_thumbnail(lora_path)
     seen_hashes = {
         str(entry["hash"]).upper() for entry in entries if entry.get("hash")
     }
@@ -409,6 +472,8 @@ def build_resource_report(
             version_name=res.version_name,
             weight=res.weight,
             unverified=res.unverified,
+            thumbnail=res.thumbnail,
+            nsfw_level=res.nsfw_level,
         )
         if res.autov2.upper() in seen_hashes:
             entry["status"] = "duplicate"

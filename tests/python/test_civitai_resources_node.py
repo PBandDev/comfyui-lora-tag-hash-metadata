@@ -432,6 +432,70 @@ def test_build_report_warns_beyond_image_saver_cap(tmp_path: Path) -> None:
     assert "30-entry" in payload[30]["warning"]
 
 
+def test_thumbnail_from_images_prefers_safe_and_rewrites_transform() -> None:
+    images = [
+        {"url": "https://image.civitai.com/b/u1/original=true/1.jpeg", "nsfwLevel": 8},
+        {"url": "https://image.civitai.com/b/u2/width=450/2.jpeg", "nsfwLevel": 1},
+    ]
+    url, level = cnode._thumbnail_from_images(images)
+    assert url == "https://image.civitai.com/b/u2/width=96,anim=false/2.jpeg"
+    assert level == 1
+
+    url, level = cnode._thumbnail_from_images([images[0]])  # nothing safe -> first
+    assert url == "https://image.civitai.com/b/u1/width=96,anim=false/1.jpeg"
+    assert level == 8
+
+    assert cnode._thumbnail_from_images([]) == (None, None)
+    assert cnode._thumbnail_from_images(None) == (None, None)
+
+
+def test_resolve_carries_thumbnail_from_version_payload(tmp_path: Path) -> None:
+    payload = dict(VERSION_3114726)
+    payload["images"] = [
+        {"url": "https://image.civitai.com/b/u/original=true/9.jpeg", "nsfwLevel": 1}
+    ]
+    fetch = _fake_fetch({"/api/v1/model-versions/3114726": payload})
+    (line,) = parse_resource_lines("https://civitai.com/models/2767064?modelVersionId=3114726")
+    res = cnode.resolve_line(line, cnode.ResolveCache(tmp_path / "c.json"), fetch)
+    assert res.thumbnail == "https://image.civitai.com/b/u/width=96,anim=false/9.jpeg"
+    assert res.nsfw_level == 1
+
+
+def test_local_lora_thumbnail_builds_stock_preview_route(tmp_path: Path, monkeypatch) -> None:
+    base = tmp_path / "loras"
+    target = base / "Illustrious" / "anime style.safetensors"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"x")
+    folder_paths = types.SimpleNamespace(get_folder_paths=lambda category: [str(base)])
+    monkeypatch.setattr(cnode, "folder_paths", folder_paths, raising=False)
+
+    assert cnode._local_lora_thumbnail(str(target)) == (
+        "/experiment/models/preview/loras/0/Illustrious/anime%20style.safetensors"
+    )
+    assert cnode._local_lora_thumbnail(str(tmp_path / "elsewhere.safetensors")) is None
+
+
+def test_build_report_attaches_local_thumbnail_to_lora_entries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    base = tmp_path / "loras"
+    foo = base / "foo.safetensors"
+    base.mkdir()
+    foo.write_bytes(b"abc")
+    folder_paths = types.SimpleNamespace(get_folder_paths=lambda category: [str(base)])
+    monkeypatch.setattr(cnode, "folder_paths", folder_paths, raising=False)
+
+    report = cnode.build_resource_report(
+        loaded_loras="<lora:foo:0.8>",
+        civitai_resources="",
+        lora_resolver=lambda name: str(foo) if name == "foo" else None,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=_fake_fetch({}),
+    )
+    payload = json.loads(report.resources_json)
+    assert payload[0]["thumbnail"] == "/experiment/models/preview/loras/0/foo.safetensors"
+
+
 def test_sanitize_name_rules() -> None:
     assert cnode.sanitize_name("Anima: Detailer, v2", "FB12FB7B90") == "Anima Detailer v2"
     assert cnode.sanitize_name("vae", "FB12FB7B90") == "vae model"
