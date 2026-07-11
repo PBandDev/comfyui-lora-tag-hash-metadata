@@ -1,0 +1,16 @@
+{
+  "packs": [
+    {
+      "name": "ComfyUI-Lora-Manager",
+      "url": "https://github.com/willmiao/ComfyUI-Lora-Manager",
+      "sha": "3e303ab3161b61693cd2f98266356e26cd71d47b",
+      "tag": "v1.1.6"
+    },
+    {
+      "name": "ComfyUI-Image-Saver",
+      "url": "https://github.com/alexopus/ComfyUI-Image-Saver",
+      "sha": "2ba0f2bc4ee5235a0f9299f415fb2fb6be78f9e9",
+      "tag": "v1.23.0"
+    }
+  ]
+}
