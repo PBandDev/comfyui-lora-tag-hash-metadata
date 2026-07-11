@@ -19,3 +19,7 @@ node.zip
 docs/plans/
 .worktrees/
 .venv/
+.e2e/
+test-results/
+playwright-report/
+tests/e2e/fixtures/
