@@ -1,19 +1,15 @@
 # ComfyUI LoRA Tag Hash Metadata
 
-ComfyUI custom node that converts `<lora:name:weight>` text into `Name:HASH:Weight`
-metadata strings for downstream nodes such as Civitai-aware metadata savers.
+ComfyUI custom nodes that credit your generation resources on CivitAI by
+embedding `Name:AUTOV2[:Weight]` hash metadata into saved images.
+
+- **Civitai Resources To Hash Metadata** (v2, primary) — credits local lora
+  tags AND any CivitAI resource (workflows, text encoders, detailers, …) from
+  pasted URLs, hashes, or AIR URNs, with an in-node status list.
+- **LoRA Tags To Hash Metadata** (v1) — converts `<lora:name:weight>` text
+  into `Name:HASH:Weight` strings. Still supported.
 
 Created with [comfyui-custom-node-template](https://github.com/PBandDev/comfyui-custom-node-template)
-
-Primary use case:
-
-- feed `loaded_loras` from LoRA Manager into `LoRA Tags To Hash Metadata`
-- connect `additional_hashes` into `Image Saver Metadata.additional_hashes`
-- preserve LoRA hash metadata so downstream nodes can resolve Civitai model info
-
-The node is generic on purpose. Any node that outputs `<lora:name:weight>` text can
-feed it, and any downstream node that expects `Name:HASH:Weight` strings can consume
-the result.
 
 ## Install
 
@@ -31,7 +27,73 @@ If you use the ComfyUI CLI instead of the Manager UI:
 comfy node install comfyui-lora-tag-hash-metadata
 ```
 
-## Node
+## Civitai Resources To Hash Metadata (v2)
+
+- Node id: `CivitaiResourcesToHashMetadata`
+- Display name: `Civitai Resources To Hash Metadata`
+- Category: `utils/metadata`
+
+CivitAI auto-links image resources purely by file hash — including resource
+types it can't detect from prompts, like whole workflows, text encoders
+("Other"), and selectively-applied detailer LoRAs. This node resolves each
+resource you list to its AutoV2 hash via the CivitAI API and emits it into
+`additional_hashes` so uploads credit the creators automatically.
+
+Typical wiring:
+
+```text
+Lora Loader (LoraManager).loaded_loras
+  -> Civitai Resources To Hash Metadata.loaded_loras
+  -> Image Saver Metadata.additional_hashes
+```
+
+Inputs:
+
+- `loaded_loras` (optional link): `<lora:name:weight>` text, e.g. from LoRA
+  Manager — handled exactly like v1
+- `civitai_resources` (multiline textbox), one resource per line:
+  - model URLs on any civitai domain (`.com`/`.red`/`.green`), optionally
+    pinned with `?modelVersionId=…` — unpinned URLs resolve to the model's
+    latest version
+  - AutoV2 hashes (10 hex) or full SHA256 hashes (64 hex)
+  - AIR URNs like `urn:air:anima:lora:civitai:2767064@3114726` (`+fileId`
+    honored)
+  - optional trailing weight: `<line> 0.8`
+  - `#` comment lines and blanks are ignored
+  - bare numeric IDs are rejected (ambiguous)
+
+Outputs:
+
+- `additional_hashes`: comma-separated `Name:AUTOV2[:Weight]` entries
+  (weight only when explicit; lora tags keep their weights)
+- `resolved` / `missing`: comma-separated names for quick display
+- `resources_json`: structured JSON of every entry (status, type, version,
+  hash, links) for downstream tooling
+
+Behavior:
+
+- in-node status list after each run: ✓ resolved (with civitai link, type and
+  version), ≡ duplicate, ✗ failed (with reason)
+- executes standalone (output node) — no downstream saver needed to check
+  your list
+- persistent on-disk cache under ComfyUI's user directory: version- and
+  hash-pinned lookups cache forever, unpinned model URLs refresh after 24h;
+  cached entries keep working offline
+- failures never abort the queue — bad lines land in `missing` and the
+  status list
+- names are sanitized for Image Saver (`,`/`:` stripped, never literally
+  `vae`), and all-decimal hashes get an explicit `:1.0` so the hash can't be
+  misparsed as a weight
+- `CIVITAI_API_TOKEN` env var is honored if set (Authorization bearer);
+  never required for public metadata
+
+> **Image Saver footgun:** `Name:HASH:Weight` (3-part) entries are only
+> parsed when Image Saver Metadata's `download_civitai_data` is **True**.
+> With it False, 3-part entries are silently dropped — this affects all v1
+> output (always weighted) and weighted v2 entries. Keep
+> `download_civitai_data=True` (the default).
+
+## LoRA Tags To Hash Metadata (v1)
 
 - Node id: `LoraTagsToHashMetadata`
 - Display name: `LoRA Tags To Hash Metadata`
@@ -62,35 +124,28 @@ Behavior:
 2. Run `pnpm install`
 3. Run `pnpm dev` to watch for changes and rebuild `dist/`
 
-### Python Test Workflow
-
-Use `uv` for Python-side tooling:
-
-```bash
-uv sync
-uv run pytest
-```
-
 ```bash
 pnpm install    # Install dependencies
 pnpm dev        # Watch mode - rebuilds dist/ on change
 pnpm build      # Build for production
-pnpm test       # Run tests
+pnpm test       # EVERYTHING: vitest + pytest + full e2e (live civitai API)
 ```
 
 **Note:** Reload ComfyUI frontend (browser refresh) for JS changes. Restart ComfyUI server for Python changes.
 
-## LoRA Tag Hash Metadata
+### Testing
 
-Typical wiring:
+One suite, no tiers: `pnpm test` runs frontend unit tests, backend Python
+tests, and a full end-to-end run against a repo-local pinned ComfyUI (with
+LoRA Manager + Image Saver + real fixture loras + the live civitai API) —
+every time, locally and in CI. See [docs/TESTING.md](docs/TESTING.md) for the
+harness details, manual serve mode (`pnpm e2e:serve`), and user stories.
 
-```text
-Lora Loader (LoraManager).loaded_loras
-  -> LoRA Tags To Hash Metadata.loaded_loras
-  -> Image Saver Metadata.additional_hashes
+```bash
+uv sync                 # python deps
+pnpm test:unit          # fast lanes only
+pnpm test:e2e           # provision .e2e/ + playwright
 ```
-
-You can also feed any other text source that emits the same tag syntax.
 
 ## Publishing to ComfyUI Registry
 
