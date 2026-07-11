@@ -294,6 +294,40 @@ def test_build_report_dedups_by_hash_lora_wins(tmp_path: Path) -> None:
     assert [e["status"] for e in payload] == ["resolved", "duplicate"]
 
 
+def test_v2_schema_io() -> None:
+    schema = cnode.CivitaiResourcesToHashMetadata.define_schema()
+    assert schema.node_id == "CivitaiResourcesToHashMetadata"
+    assert schema.display_name == "Civitai Resources To Hash Metadata"
+    assert schema.category == "utils/metadata"
+    assert [item.name for item in schema.inputs] == ["loaded_loras", "civitai_resources"]
+    assert schema.inputs[0].force_input is True
+    assert schema.inputs[0].optional is True
+    assert schema.inputs[1].multiline is True
+    assert [item.name for item in schema.outputs] == [
+        "additional_hashes",
+        "resolved",
+        "missing",
+        "resources_json",
+    ]
+
+
+def test_v2_execute_returns_ui_payload(tmp_path: Path, monkeypatch) -> None:
+    cache_cls = cnode.ResolveCache
+    monkeypatch.setattr(cnode, "ResolveCache", lambda: cache_cls(tmp_path / "c.json"))
+    monkeypatch.setattr(cnode, "default_fetch", _fake_fetch({}))
+
+    output = cnode.CivitaiResourcesToHashMetadata.execute(
+        loaded_loras="", civitai_resources="not a url"
+    )
+
+    resources_json = output.args[3]
+    assert output.args[:3] == ("", "", "not a url")
+    payload = json.loads(resources_json)
+    assert len(payload) == 1
+    assert payload[0]["status"] == "missing"
+    assert output.ui == {"civitai_resources_status": [resources_json]}
+
+
 def test_build_report_soft_fails_and_escapes_missing(tmp_path: Path) -> None:
     report = cnode.build_resource_report(
         loaded_loras="",

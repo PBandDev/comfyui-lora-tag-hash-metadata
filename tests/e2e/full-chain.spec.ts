@@ -32,8 +32,8 @@ function chainPrompt(civitaiResources: string, filename: string): Record<string,
       },
     },
     n3: {
-      class_type: "LoraTagsToHashMetadata",
-      inputs: { loaded_loras: ["n2", 3] },
+      class_type: "CivitaiResourcesToHashMetadata",
+      inputs: { loaded_loras: ["n2", 3], civitai_resources: civitaiResources },
     },
     n4: {
       class_type: "Image Saver Metadata",

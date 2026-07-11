@@ -187,7 +187,11 @@ class LoraManagerToImageSaverHashes(io.ComfyNode):
 
 class LoraHashBridgeExtension(ComfyExtension):
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [LoraManagerToImageSaverHashes]
+        if __package__:
+            from .civitai_resources_node import CivitaiResourcesToHashMetadata
+        else:
+            from civitai_resources_node import CivitaiResourcesToHashMetadata
+        return [LoraManagerToImageSaverHashes, CivitaiResourcesToHashMetadata]
 
 
 def comfy_entrypoint() -> ComfyExtension:

@@ -15,6 +15,8 @@ try:
 except ImportError:
     folder_paths = None
 
+from comfy_api.v0_0_2 import io
+
 if __package__:
     from .lora_manager_to_image_saver_hashes import build_additional_hashes, resolve_lora_path
 else:
@@ -306,10 +308,11 @@ def build_resource_report(
     civitai_resources: str,
     lora_resolver=None,
     cache: ResolveCache | None = None,
-    fetch=default_fetch,
+    fetch=None,
 ) -> ResourceReport:
     from_v1 = build_additional_hashes(loaded_loras or "", lora_resolver or resolve_lora_path)
-    cache = cache or ResolveCache()
+    cache = cache if cache is not None else ResolveCache()
+    fetch = fetch if fetch is not None else default_fetch
     entries: list[dict] = [dict(entry) for entry in from_v1.entries]
     seen_hashes = {
         str(entry["hash"]).upper() for entry in entries if entry.get("hash")
@@ -354,3 +357,44 @@ def build_resource_report(
         missing=",".join(missing_parts),
         resources_json=json.dumps(entries),
     )
+
+
+class CivitaiResourcesToHashMetadata(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="CivitaiResourcesToHashMetadata",
+            display_name="Civitai Resources To Hash Metadata",
+            category="utils/metadata",
+            description=(
+                "Credit local lora tags AND any CivitAI resource (URL / AutoV2 / SHA256 / "
+                "AIR, one per line; optional trailing weight; # comments) as "
+                "Name:AUTOV2[:Weight] metadata entries."
+            ),
+            inputs=[
+                io.String.Input("loaded_loras", multiline=True, optional=True, force_input=True),
+                io.String.Input(
+                    "civitai_resources",
+                    multiline=True,
+                    default="",
+                    placeholder="https://civitai.com/models/... | AutoV2 | urn:air:... (# comments ok)",
+                ),
+            ],
+            outputs=[
+                io.String.Output("additional_hashes"),
+                io.String.Output("resolved"),
+                io.String.Output("missing"),
+                io.String.Output("resources_json"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, loaded_loras: str = "", civitai_resources: str = "") -> io.NodeOutput:
+        report = build_resource_report(loaded_loras, civitai_resources)
+        return io.NodeOutput(
+            report.additional_hashes,
+            report.resolved,
+            report.missing,
+            report.resources_json,
+            ui={"civitai_resources_status": [report.resources_json]},
+        )
