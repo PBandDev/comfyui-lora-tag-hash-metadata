@@ -89,3 +89,19 @@ export function removeHashLine(text: string, autov2: string): string {
   const target = autov2.toUpperCase();
   return filterLines(text, (body) => hashOf(body) !== target);
 }
+
+// Status rows carry the raw line they came from — removing by raw text also
+// works for lines the identity parsers reject (invalid/missing rows).
+export function removeRawLine(text: string, raw: string): string {
+  const target = raw.trim();
+  if (target.length === 0) return text;
+  let removed = false;
+  return text
+    .split("\n")
+    .filter((line) => {
+      if (removed || line.trim() !== target) return true;
+      removed = true;
+      return false;
+    })
+    .join("\n");
+}

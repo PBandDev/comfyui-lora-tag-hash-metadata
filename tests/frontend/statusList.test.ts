@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildStatusList, parseStatusPayload, type ResourceEntry } from "../../src/statusList";
 
 const entries: ResourceEntry[] = [
@@ -88,6 +88,41 @@ describe("buildStatusList", () => {
     buildStatusList(entries);
     buildStatusList(entries);
     expect(document.querySelectorAll("#clth-status-styles-v1").length).toBe(1);
+  });
+
+  it("renders a remove button only for rows with a source line", () => {
+    const onRemove = vi.fn();
+    const el = buildStatusList(
+      [
+        entries[0], // url row — has source
+        { kind: "lora", status: "resolved", name: "local", hash: "AB12CD34EF" }, // v1 row — no source
+      ],
+      { onRemove },
+    );
+    const buttons = el.querySelectorAll<HTMLButtonElement>(".clth-x");
+    expect(buttons).toHaveLength(1);
+    buttons[0].click();
+    expect(onRemove).toHaveBeenCalledWith(entries[0]);
+  });
+
+  it("renders no remove buttons without an onRemove callback", () => {
+    expect(buildStatusList(entries).querySelector(".clth-x")).toBeNull();
+  });
+
+  it("renders a refresh button when onRefresh is given, even for the empty state", () => {
+    const onRefresh = vi.fn();
+    const el = buildStatusList([], { onRefresh });
+    const button = el.querySelector<HTMLButtonElement>(".clth-refresh");
+    expect(button).not.toBeNull();
+    button?.click();
+    expect(onRefresh).toHaveBeenCalledOnce();
+    expect(buildStatusList(entries).querySelector(".clth-refresh")).toBeNull();
+  });
+
+  it("renders a note footer when given", () => {
+    const el = buildStatusList(entries, { note: "preview — queue a prompt to finalize" });
+    expect(el.querySelector(".clth-note")?.textContent).toContain("preview");
+    expect(buildStatusList(entries).querySelector(".clth-note")).toBeNull();
   });
 });
 

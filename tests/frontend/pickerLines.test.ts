@@ -4,6 +4,7 @@ import {
   identitiesIn,
   lineFor,
   removeHashLine,
+  removeRawLine,
   removeVersionLine,
 } from "../../src/pickerLines";
 
@@ -82,5 +83,35 @@ describe("removeVersionLine / removeHashLine", () => {
     expect(ids.hashes.has("CD64AF8696")).toBe(true);
     expect(ids.versionIds.has(77)).toBe(true);
     expect(removeVersionLine(crlf, 77)).not.toContain("urn:air:");
+  });
+});
+
+describe("removeRawLine", () => {
+  it("removes the first line matching the raw text, preserving everything else", () => {
+    const out = removeRawLine(TEXT, "CD64AF8696");
+    expect(out).not.toContain("CD64AF8696");
+    expect(out.split("\n")).toHaveLength(TEXT.split("\n").length - 1);
+    expect(out).toContain("# my resources");
+  });
+
+  it("removes invalid/unparseable lines too (status rows for bad input)", () => {
+    const text = "good line missing from parser\nCD64AF8696";
+    expect(removeRawLine(text, "good line missing from parser")).toBe("CD64AF8696");
+  });
+
+  it("removes only the first occurrence of duplicated raw lines", () => {
+    const text = "CD64AF8696\nCD64AF8696";
+    expect(removeRawLine(text, "CD64AF8696")).toBe("CD64AF8696");
+  });
+
+  it("matches trimmed content and leaves non-matches verbatim", () => {
+    const text = "  CD64AF8696  \r\nurn:air:anima:lora:civitai:1@77\r\n";
+    const out = removeRawLine(text, "CD64AF8696");
+    expect(out).not.toContain("CD64AF8696");
+    expect(out).toContain("urn:air:anima:lora:civitai:1@77\r\n");
+  });
+
+  it("returns text unchanged when nothing matches", () => {
+    expect(removeRawLine(TEXT, "not present")).toBe(TEXT);
   });
 });
