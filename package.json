@@ -10,7 +10,7 @@
     "setup:e2e": "playwright install --with-deps chromium && node scripts/setup-e2e-comfy.mjs && node scripts/setup-e2e-packs.mjs",
     "test:e2e": "pnpm build && pnpm setup:e2e && playwright test",
     "test:frontend": "vitest run",
-    "test:backend": "uv run pytest tests/python -q",
+    "test:backend": "uv run python -m pytest tests/python -q",
     "test:unit": "pnpm test:frontend && pnpm test:backend",
     "test": "pnpm test:unit && pnpm test:e2e",
     "test:watch": "vitest",
