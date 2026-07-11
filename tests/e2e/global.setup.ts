@@ -80,6 +80,23 @@ function stopExistingServer(): boolean {
   return true;
 }
 
+async function waitForLoraManagerScan(baseURL: string): Promise<void> {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseURL}/api/lm/loras/list?page_size=1`);
+      if (response.ok) {
+        const data = (await response.json()) as { items?: object[] };
+        if ((data.items?.length ?? 0) > 0) return;
+      }
+    } catch {
+      // server still warming up — keep polling
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2000));
+  }
+  throw new Error("LoRA Manager scan did not surface fixture loras within 120s");
+}
+
 async function waitForReady() {
   const startedAt = Date.now();
 
@@ -149,4 +166,7 @@ setup("start repo-local ComfyUI for e2e", async () => {
   writeFileSync(pidFile, String(child.pid), "utf8");
   child.unref();
   await waitForReady();
+  // The picker's Local tab issues a single /loras/list call — LM's startup
+  // scan must have surfaced the fixture loras before any spec runs.
+  await waitForLoraManagerScan(e2eConfig.baseUrl);
 });
