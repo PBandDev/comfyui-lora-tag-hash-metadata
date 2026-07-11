@@ -39,12 +39,25 @@ types it can't detect from prompts, like whole workflows, text encoders
 resource you list to its AutoV2 hash via the CivitAI API and emits it into
 `additional_hashes` so uploads credit the creators automatically.
 
+![Civitai Resources To Hash Metadata node](assets/civitai-resources-node.png)
+
 Typical wiring:
 
 ```text
 Lora Loader (LoraManager).loaded_loras
   -> Civitai Resources To Hash Metadata.loaded_loras
   -> Image Saver Metadata.additional_hashes
+```
+
+Example `civitai_resources` input:
+
+```text
+# workflows, text encoders, detailers — anything on civitai
+https://civitai.red/models/1362968/workflow-for-anima-and-sdxl-noobai-xlillustrious-xl
+https://civitai.red/models/2598886/anima-text-encoder-qwen3-06b-heretic-abliterated-uncensored
+https://civitai.com/models/2767064/anima-detailer?modelVersionId=3114726 0.8
+CD64AF8696
+urn:air:anima:lora:civitai:2767064@3114726
 ```
 
 Inputs:
@@ -76,8 +89,7 @@ Behavior:
   (civitai preview for URL/hash/AIR entries, local sidecar preview via
   ComfyUI's stock model-preview route for loras), name linked to civitai,
   type · version subline, and a status accent (green resolved / amber
-  duplicate / red failed with reason); NSFW previews (level > PG-13) render
-  blurred
+  duplicate / red failed with reason)
 - the list is capped at ~320px and scrolls inside the node — it never
   overflows the node bounds
 - executes standalone (output node) — no downstream saver needed to check

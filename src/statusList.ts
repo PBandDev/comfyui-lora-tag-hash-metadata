@@ -12,7 +12,6 @@ export interface ResourceEntry {
   unverified?: boolean;
   warning?: string | null;
   thumbnail?: string | null;
-  nsfw_level?: number | null;
   error?: string | null;
 }
 
@@ -21,7 +20,6 @@ export interface StatusListOptions {
 }
 
 const STATUSES: ReadonlyArray<ResourceEntry["status"]> = ["resolved", "missing", "duplicate"];
-const NSFW_BLUR_THRESHOLD = 2;
 const STYLE_ID = "clth-status-styles-v1";
 
 const STATUS_STYLES = `
@@ -63,7 +61,6 @@ const STATUS_STYLES = `
 .clth-thumb img{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
 }
-.clth-thumb img.clth-blur{filter:blur(6px)}
 .clth-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .clth-name{
   color:var(--fg-color,#fff);font-weight:600;
@@ -147,11 +144,6 @@ function buildThumb(entry: ResourceEntry, options: StatusListOptions): HTMLDivEl
     const image = document.createElement("img");
     image.alt = "";
     image.loading = "lazy";
-    if (entry.nsfw_level !== null && entry.nsfw_level !== undefined) {
-      if (entry.nsfw_level > NSFW_BLUR_THRESHOLD) {
-        image.classList.add("clth-blur");
-      }
-    }
     image.addEventListener("load", () => {
       options.onImageLoad?.();
     });

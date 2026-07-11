@@ -39,8 +39,6 @@ AUTOV2_RE = re.compile(r"^[0-9A-F]{10}$")
 # filename (e.g. /original=true/ or /width=450/) — swap it for a thumbnail.
 THUMBNAIL_TRANSFORM_RE = re.compile(r"/(?:original=true|width=\d+)[^/]*/")
 THUMBNAIL_TRANSFORM = "/width=96,anim=false/"
-# nsfwLevel bitmask: 1=PG, 2=PG13, 4=R, 8=X, 16=XXX, 32=Blocked.
-NSFW_SAFE_MAX = 2
 
 URL_RE = re.compile(
     r"^https?://(?:www\.)?civitai\.(?:com|red|green)/models/(\d+)(?:/[^\s?]*)?(?:\?\S*)?$",
@@ -229,33 +227,20 @@ class ResolvedResource:
     version_name: str = ""
     unverified: bool = False
     thumbnail: str | None = None
-    nsfw_level: int | None = None
 
     @property
     def weight(self) -> float | None:
         return self.line.weight
 
 
-def _thumbnail_from_images(images: object) -> tuple[str | None, int | None]:
-    """Pick the safest preview image and rewrite it to a ~96px thumbnail url."""
+def _thumbnail_from_images(images: object) -> str | None:
+    """Rewrite the resource's first preview image to a ~96px thumbnail url."""
     if not isinstance(images, list):
-        return (None, None)
-    candidates = [
-        image
-        for image in images
-        if isinstance(image, dict) and isinstance(image.get("url"), str)
-    ]
-    if not candidates:
-        return (None, None)
-    safe = [
-        image
-        for image in candidates
-        if isinstance(image.get("nsfwLevel"), int) and image["nsfwLevel"] <= NSFW_SAFE_MAX
-    ]
-    chosen = (safe or candidates)[0]
-    url = THUMBNAIL_TRANSFORM_RE.sub(THUMBNAIL_TRANSFORM, chosen["url"], count=1)
-    level = chosen.get("nsfwLevel")
-    return (url, level if isinstance(level, int) else None)
+        return None
+    for image in images:
+        if isinstance(image, dict) and isinstance(image.get("url"), str):
+            return THUMBNAIL_TRANSFORM_RE.sub(THUMBNAIL_TRANSFORM, image["url"], count=1)
+    return None
 
 
 def _local_lora_thumbnail(full_path: str) -> str | None:
@@ -308,7 +293,6 @@ def _from_version_payload(line: ResourceLine, data: dict) -> ResolvedResource:
     model = data.get("model")
     if not isinstance(model, dict):
         model = {}
-    thumbnail, nsfw_level = _thumbnail_from_images(data.get("images"))
     return ResolvedResource(
         line=line,
         name=str(model.get("name") or "").strip(),
@@ -317,8 +301,7 @@ def _from_version_payload(line: ResourceLine, data: dict) -> ResolvedResource:
         model_id=data.get("modelId") or line.model_id,
         version_id=data.get("id"),
         version_name=str(data.get("name") or ""),
-        thumbnail=thumbnail,
-        nsfw_level=nsfw_level,
+        thumbnail=_thumbnail_from_images(data.get("images")),
     )
 
 
@@ -363,7 +346,6 @@ def resolve_line(line: ResourceLine, cache: ResolveCache, fetch=default_fetch) -
     latest = versions[0]
     if not isinstance(latest, dict):
         raise ResolveError("unexpected civitai api payload")
-    thumbnail, nsfw_level = _thumbnail_from_images(latest.get("images"))
     return ResolvedResource(
         line=line,
         name=str(cached.get("name") or "").strip(),
@@ -372,8 +354,7 @@ def resolve_line(line: ResourceLine, cache: ResolveCache, fetch=default_fetch) -
         model_id=cached.get("id"),
         version_id=latest.get("id"),
         version_name=str(latest.get("name") or ""),
-        thumbnail=thumbnail,
-        nsfw_level=nsfw_level,
+        thumbnail=_thumbnail_from_images(latest.get("images")),
     )
 
 
@@ -473,7 +454,6 @@ def build_resource_report(
             weight=res.weight,
             unverified=res.unverified,
             thumbnail=res.thumbnail,
-            nsfw_level=res.nsfw_level,
         )
         if res.autov2.upper() in seen_hashes:
             entry["status"] = "duplicate"

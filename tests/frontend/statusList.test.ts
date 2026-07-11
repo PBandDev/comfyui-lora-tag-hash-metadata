@@ -72,20 +72,11 @@ describe("buildStatusList", () => {
     const withThumb = buildStatusList([
       { ...entries[0], thumbnail: "https://image.civitai.com/x/width=96,anim=false/1.jpeg" },
     ]);
-    const img = withThumb.querySelector("img");
-    expect(img?.src).toContain("width=96");
-    expect(img?.classList.contains("clth-blur")).toBe(false);
+    expect(withThumb.querySelector("img")?.src).toContain("width=96");
 
     const withoutThumb = buildStatusList(entries);
     expect(withoutThumb.querySelector("img")).toBeNull();
     expect(withoutThumb.querySelector(".clth-thumb-glyph")?.textContent).toBe("L");
-  });
-
-  it("blurs thumbnails above the nsfw threshold", () => {
-    const el = buildStatusList([
-      { ...entries[0], thumbnail: "https://image.civitai.com/x/width=96/1.jpeg", nsfw_level: 8 },
-    ]);
-    expect(el.querySelector("img")?.classList.contains("clth-blur")).toBe(true);
   });
 
   it("does not link missing rows", () => {

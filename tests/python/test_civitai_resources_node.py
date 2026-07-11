@@ -432,33 +432,28 @@ def test_build_report_warns_beyond_image_saver_cap(tmp_path: Path) -> None:
     assert "30-entry" in payload[30]["warning"]
 
 
-def test_thumbnail_from_images_prefers_safe_and_rewrites_transform() -> None:
+def test_thumbnail_from_images_uses_first_and_rewrites_transform() -> None:
     images = [
-        {"url": "https://image.civitai.com/b/u1/original=true/1.jpeg", "nsfwLevel": 8},
-        {"url": "https://image.civitai.com/b/u2/width=450/2.jpeg", "nsfwLevel": 1},
+        {"url": "https://image.civitai.com/b/u1/original=true/1.jpeg"},
+        {"url": "https://image.civitai.com/b/u2/width=450/2.jpeg"},
     ]
-    url, level = cnode._thumbnail_from_images(images)
-    assert url == "https://image.civitai.com/b/u2/width=96,anim=false/2.jpeg"
-    assert level == 1
-
-    url, level = cnode._thumbnail_from_images([images[0]])  # nothing safe -> first
+    url = cnode._thumbnail_from_images(images)
     assert url == "https://image.civitai.com/b/u1/width=96,anim=false/1.jpeg"
-    assert level == 8
 
-    assert cnode._thumbnail_from_images([]) == (None, None)
-    assert cnode._thumbnail_from_images(None) == (None, None)
+    url = cnode._thumbnail_from_images([{"nope": 1}, images[1]])  # skip malformed
+    assert url == "https://image.civitai.com/b/u2/width=96,anim=false/2.jpeg"
+
+    assert cnode._thumbnail_from_images([]) is None
+    assert cnode._thumbnail_from_images(None) is None
 
 
 def test_resolve_carries_thumbnail_from_version_payload(tmp_path: Path) -> None:
     payload = dict(VERSION_3114726)
-    payload["images"] = [
-        {"url": "https://image.civitai.com/b/u/original=true/9.jpeg", "nsfwLevel": 1}
-    ]
+    payload["images"] = [{"url": "https://image.civitai.com/b/u/original=true/9.jpeg"}]
     fetch = _fake_fetch({"/api/v1/model-versions/3114726": payload})
     (line,) = parse_resource_lines("https://civitai.com/models/2767064?modelVersionId=3114726")
     res = cnode.resolve_line(line, cnode.ResolveCache(tmp_path / "c.json"), fetch)
     assert res.thumbnail == "https://image.civitai.com/b/u/width=96,anim=false/9.jpeg"
-    assert res.nsfw_level == 1
 
 
 def test_local_lora_thumbnail_builds_stock_preview_route(tmp_path: Path, monkeypatch) -> None:
