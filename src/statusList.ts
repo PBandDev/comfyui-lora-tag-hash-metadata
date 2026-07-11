@@ -80,7 +80,7 @@ export function buildStatusList(entries: ResourceEntry[]): HTMLDivElement {
     icon.style.flex = "0 0 auto";
     row.appendChild(icon);
     const body = document.createElement("span");
-    body.style.cssText = "color:inherit;word-break:break-all;min-width:0;";
+    body.style.cssText = "color:inherit;overflow-wrap:anywhere;min-width:0;";
     if (ok || dup) {
       const url = civitaiUrl(entry);
       const label = rowLabel(entry);
