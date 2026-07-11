@@ -1,7 +1,13 @@
 import type { ComfyApp } from "@comfyorg/comfyui-frontend-types";
 import { SETTINGS_IDS } from "./constants";
 import { openResourcePicker } from "./picker";
-import { buildStatusList, parseStatusPayload } from "./statusList";
+import { removeRawLine } from "./pickerLines";
+import { fetchPreview } from "./preview";
+import {
+  buildStatusList,
+  parseStatusPayload,
+  type StatusListOptions,
+} from "./statusList";
 
 declare global {
   const app: ComfyApp;
@@ -55,10 +61,72 @@ interface StatusNodeLike {
   onNodeCreated?(): void;
   onExecuted?(message: StatusMessage): void;
   onRemoved?(): void;
+  onConfigure?(info: object): void;
 }
 
 const statusHosts = new WeakMap<StatusNodeLike, HTMLDivElement>();
 const pickerClosers = new WeakMap<StatusNodeLike, () => void>();
+const previewSeqs = new WeakMap<StatusNodeLike, number>();
+const previewControllers = new WeakMap<StatusNodeLike, AbortController>();
+
+function resourceTextWidget(node: StatusNodeLike): TextWidgetLike | undefined {
+  return node.widgets?.find((widget) => widget.name === "civitai_resources");
+}
+
+function setResourceText(node: StatusNodeLike, value: string): void {
+  const widget = resourceTextWidget(node);
+  if (widget === undefined) return;
+  widget.value = value;
+  widget.callback?.(value);
+  node.setDirtyCanvas?.(true, true);
+}
+
+function statusOptionsFor(node: StatusNodeLike): StatusListOptions {
+  return {
+    onImageLoad: () => node.setDirtyCanvas?.(true, true),
+    onRefresh: () => void refreshPreview(node),
+    onRemove: (entry) => {
+      const widget = resourceTextWidget(node);
+      if (widget === undefined || typeof entry.source !== "string") return;
+      setResourceText(node, removeRawLine(String(widget.value ?? ""), entry.source));
+      void refreshPreview(node);
+    },
+  };
+}
+
+// Re-render the status list from the textbox via the pack's /clth/preview
+// route — same resolver+cache as a run, so picker applies, row removals, and
+// workflow loads show live rows without queueing a prompt.
+async function refreshPreview(node: StatusNodeLike): Promise<void> {
+  const widget = resourceTextWidget(node);
+  const host = statusHostFor(node);
+  if (widget === undefined || host === null) return;
+  const seq = (previewSeqs.get(node) ?? 0) + 1;
+  previewSeqs.set(node, seq);
+  previewControllers.get(node)?.abort();
+  const controller = new AbortController();
+  previewControllers.set(node, controller);
+  const text = String(widget.value ?? "");
+  if (text.trim().length === 0) {
+    host.replaceChildren(buildStatusList([], statusOptionsFor(node)));
+    syncNodeSize(node);
+    return;
+  }
+  try {
+    const entries = await fetchPreview(text, controller.signal);
+    if (previewSeqs.get(node) !== seq) return;
+    host.replaceChildren(
+      buildStatusList(entries, {
+        ...statusOptionsFor(node),
+        note: "preview — queue a prompt to finalize credits",
+      }),
+    );
+    syncNodeSize(node);
+  } catch {
+    // Preview is best-effort (server restarting, offline) — keep whatever the
+    // list currently shows rather than flashing an error state.
+  }
+}
 
 function createStatusHost(node: StatusNodeLike): HTMLDivElement | null {
   if (typeof node.addDOMWidget !== "function") {
@@ -78,7 +146,7 @@ function createStatusHost(node: StatusNodeLike): HTMLDivElement | null {
   if (widget !== undefined) {
     widget.serialize = false;
   }
-  host.replaceChildren(buildStatusList([]));
+  host.replaceChildren(buildStatusList([], statusOptionsFor(node)));
   statusHosts.set(node, host);
   return host;
 }
@@ -96,9 +164,8 @@ function createPickerButton(node: StatusNodeLike): void {
       const close = openResourcePicker({
         getText: () => String(textWidget.value ?? ""),
         setText: (value) => {
-          textWidget.value = value;
-          textWidget.callback?.(value);
-          node.setDirtyCanvas?.(true, true);
+          setResourceText(node, value);
+          void refreshPreview(node);
         },
       });
       // null = a picker is already open; never overwrite the live closer.
@@ -154,7 +221,15 @@ app.registerExtension({
     proto.onRemoved = function (this: StatusNodeLike) {
       pickerClosers.get(this)?.();
       pickerClosers.delete(this);
+      previewControllers.get(this)?.abort();
       originalRemoved?.call(this);
+    };
+    const originalConfigure = proto.onConfigure;
+    proto.onConfigure = function (this: StatusNodeLike, info: object) {
+      originalConfigure?.call(this, info);
+      // Widget values land during configure — preview on the next tick so a
+      // loaded workflow shows its resources without queueing.
+      setTimeout(() => void refreshPreview(this), 0);
     };
     const originalExecuted = proto.onExecuted;
     proto.onExecuted = function (this: StatusNodeLike, message: StatusMessage) {
@@ -164,11 +239,11 @@ app.registerExtension({
       if (host === null) {
         return;
       }
-      host.replaceChildren(
-        buildStatusList(parseStatusPayload(payload), {
-          onImageLoad: () => this.setDirtyCanvas?.(true, true),
-        }),
-      );
+      // Executed payload is authoritative — cancel any in-flight preview so a
+      // slow response can't overwrite the run's rows.
+      previewSeqs.set(this, (previewSeqs.get(this) ?? 0) + 1);
+      previewControllers.get(this)?.abort();
+      host.replaceChildren(buildStatusList(parseStatusPayload(payload), statusOptionsFor(this)));
       syncNodeSize(this);
     };
   },
