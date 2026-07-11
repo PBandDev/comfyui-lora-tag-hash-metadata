@@ -56,6 +56,7 @@ class _FakeSchema:
     description: str
     inputs: list[object]
     outputs: list[object]
+    is_output_node: bool = False
 
 
 class _FakeComfyNode:
@@ -249,6 +250,39 @@ def test_hash_line_survives_failed_lookup(tmp_path: Path) -> None:
     assert (res.autov2, res.name, res.unverified) == ("D6A3AC6F8A", "D6A3AC6F8A", True)
 
 
+def test_default_fetch_sends_custom_user_agent(monkeypatch) -> None:
+    captured: list = []
+
+    class _Response:
+        status = 200
+
+        def read(self) -> bytes:
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_urlopen(request, timeout=None):
+        captured.append(request)
+        return _Response()
+
+    monkeypatch.setattr(cnode.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
+    cnode.default_fetch("/api/v1/model-versions/1")
+
+    request = captured[0]
+    # Cloudflare 403s urllib's default Python-urllib agent.
+    assert request.get_header("User-agent") == cnode.USER_AGENT
+    assert request.get_header("Authorization") is None
+
+    monkeypatch.setenv("CIVITAI_API_TOKEN", "test-token")
+    cnode.default_fetch("/api/v1/model-versions/1")
+    assert captured[1].get_header("Authorization") == "Bearer test-token"
+
+
 def test_sanitize_name_rules() -> None:
     assert cnode.sanitize_name("Anima: Detailer, v2", "FB12FB7B90") == "Anima Detailer v2"
     assert cnode.sanitize_name("vae", "FB12FB7B90") == "vae model"
@@ -309,6 +343,7 @@ def test_v2_schema_io() -> None:
         "missing",
         "resources_json",
     ]
+    assert schema.is_output_node is True
 
 
 def test_v2_execute_returns_ui_payload(tmp_path: Path, monkeypatch) -> None:

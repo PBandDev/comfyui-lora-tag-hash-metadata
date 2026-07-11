@@ -26,6 +26,8 @@ time_real = time.time
 API_HOSTS = ("https://civitai.com", "https://civitai.red")
 MODEL_TTL_SECONDS = 86400
 HTTP_TIMEOUT_SECONDS = 10.0
+# Cloudflare returns 403 for urllib's default "Python-urllib/x.y" agent.
+USER_AGENT = "comfyui-lora-tag-hash-metadata"
 
 URL_RE = re.compile(
     r"^https?://(?:www\.)?civitai\.(?:com|red|green)/models/(\d+)(?:/[^\s?]*)?(?:\?\S*)?$",
@@ -122,7 +124,7 @@ def default_fetch(path: str) -> object:
         if delay:
             time.sleep(delay)
         for host in API_HOSTS:
-            request = urllib.request.Request(host + path)
+            request = urllib.request.Request(host + path, headers={"User-Agent": USER_AGENT})
             if token:
                 request.add_header("Authorization", f"Bearer {token}")
             try:
@@ -386,6 +388,9 @@ class CivitaiResourcesToHashMetadata(io.ComfyNode):
                 io.String.Output("missing"),
                 io.String.Output("resources_json"),
             ],
+            # Output node: executes standalone so the status list fills without
+            # requiring a downstream saver to be wired up.
+            is_output_node=True,
         )
 
     @classmethod

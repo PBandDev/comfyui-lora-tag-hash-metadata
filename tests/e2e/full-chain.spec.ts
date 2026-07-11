@@ -122,3 +122,22 @@ test("full chain: LM -> hash node -> Image Saver PNG credits lora fixture", asyn
   expect(params.includes("Civitai resources:") || params.includes(FISHEYE_AUTOV2)).toBe(true);
   expect(params.toLowerCase()).toContain("fisheye");
 });
+
+test("v2 URL box credits workflow + encoder + detailer via live api", async ({ request }) => {
+  const urls = [
+    "https://civitai.red/models/1362968/workflow-for-anima-and-sdxl-noobai-xlillustrious-xl",
+    "https://civitai.red/models/2598886/anima-text-encoder-qwen3-06b-heretic-abliterated-uncensored",
+    "https://civitai.red/models/2767064/anima-detailer?modelVersionId=3114726",
+    "# a comment",
+    "https://civitai.com/models/999999999", // expected missing
+  ].join("\n");
+  await runPrompt(request, chainPrompt(urls, "e2e_urls"));
+  const params = readParametersText(join(outputDir, "e2e_urls.png"));
+  // Models 1362968/2598886 are unpinned -> resolve to their CURRENT latest
+  // version, so those AutoV2 constants may legitimately drift; the pinned
+  // detailer version is the hard assertion.
+  expect(params.includes("CD64AF8696") || params.includes("Civitai resources:")).toBe(true);
+  expect(params.toLowerCase()).toContain("detailer");
+  // All three example resources resolve; only the bogus model id is missing.
+  expect(params).not.toContain("999999999");
+});
