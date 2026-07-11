@@ -283,6 +283,155 @@ def test_default_fetch_sends_custom_user_agent(monkeypatch) -> None:
     assert captured[1].get_header("Authorization") == "Bearer test-token"
 
 
+def test_parse_rejects_non_finite_weight() -> None:
+    huge = "9" * 400
+    (line,) = parse_resource_lines(f"https://civitai.com/models/2767064 {huge}")
+    assert line.kind == "invalid"
+    assert "non-finite" in (line.error or "")
+
+
+def test_pick_autov2_rejects_malformed_hash(tmp_path: Path) -> None:
+    poisoned = {
+        "id": 1,
+        "modelId": 2,
+        "name": "v1",
+        "model": {"name": "Evil", "type": "LORA"},
+        "files": [{"id": 3, "hashes": {"AutoV2": "ABC,FORGED:1234567890"}}],
+    }
+    fetch = _fake_fetch({"/api/v1/model-versions/3114726": poisoned})
+    (line,) = parse_resource_lines("https://civitai.com/models/2767064?modelVersionId=3114726")
+    with pytest.raises(cnode.ResolveError, match="valid AutoV2"):
+        cnode.resolve_line(line, cnode.ResolveCache(tmp_path / "c.json"), fetch)
+
+
+def test_cache_get_ignores_non_finite_fetched_at(tmp_path: Path) -> None:
+    cache_file = tmp_path / "c.json"
+    cache_file.write_text(
+        '{"m:1": {"fetched_at": Infinity, "value": {"id": 1}}}', encoding="utf-8"
+    )
+    cache = cnode.ResolveCache(cache_file)
+    assert cache.get("m:1", max_age=cnode.MODEL_TTL_SECONDS) is None
+
+
+def test_cache_put_survives_replace_failure(tmp_path: Path, monkeypatch) -> None:
+    cache = cnode.ResolveCache(tmp_path / "c.json")
+
+    def broken_replace(self: Path, target) -> None:
+        raise OSError("locked by another process")
+
+    monkeypatch.setattr(Path, "replace", broken_replace)
+    cache.put("v:1", {"id": 1})  # must not raise
+    assert cache.get("v:1") == {"id": 1}  # in-memory copy still serves
+
+
+def _urlopen_stub(responses: dict[str, object]):
+    """Map full request url -> bytes payload or int http error code."""
+    import io as _io
+    import urllib.error as _err
+
+    calls: list[str] = []
+
+    class _Response:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def urlopen(request, timeout=None):
+        url = request.full_url
+        calls.append(url)
+        outcome = responses[url]
+        if isinstance(outcome, int):
+            raise _err.HTTPError(url, outcome, "err", None, _io.BytesIO(b""))
+        assert isinstance(outcome, bytes)
+        return _Response(outcome)
+
+    urlopen.calls = calls
+    return urlopen
+
+
+def test_default_fetch_single_host_404_falls_through_to_other_host(monkeypatch) -> None:
+    stub = _urlopen_stub(
+        {
+            "https://civitai.com/api/v1/model-versions/1": 404,
+            "https://civitai.red/api/v1/model-versions/1": b'{"id": 1}',
+        }
+    )
+    monkeypatch.setattr(cnode.urllib.request, "urlopen", stub)
+    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
+    assert cnode.default_fetch("/api/v1/model-versions/1") == {"id": 1}
+
+
+def test_default_fetch_404_on_all_hosts_raises_not_found(monkeypatch) -> None:
+    stub = _urlopen_stub(
+        {
+            "https://civitai.com/api/v1/model-versions/1": 404,
+            "https://civitai.red/api/v1/model-versions/1": 404,
+        }
+    )
+    monkeypatch.setattr(cnode.urllib.request, "urlopen", stub)
+    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
+    with pytest.raises(cnode.NotFoundError):
+        cnode.default_fetch("/api/v1/model-versions/1")
+    assert len(stub.calls) == 2  # no pointless retries once both hosts agree
+
+
+def test_default_fetch_invalid_utf8_is_soft_resolve_error(monkeypatch) -> None:
+    stub = _urlopen_stub(
+        {
+            "https://civitai.com/api/v1/model-versions/1": b"\xff\xfe\xfa",
+            "https://civitai.red/api/v1/model-versions/1": b"\xff\xfe\xfa",
+        }
+    )
+    monkeypatch.setattr(cnode.urllib.request, "urlopen", stub)
+    monkeypatch.setattr(cnode.time, "sleep", lambda seconds: None)
+    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
+    with pytest.raises(cnode.ResolveError, match="unreachable"):
+        cnode.default_fetch("/api/v1/model-versions/1")
+
+
+def test_build_report_circuit_breaker_stops_after_repeated_failures(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def failing_fetch(path: str) -> object:
+        calls.append(path)
+        raise cnode.ResolveError("civitai api unreachable: boom")
+
+    urls = "\n".join(f"https://civitai.com/models/{i}" for i in range(1, 6))
+    report = cnode.build_resource_report(
+        loaded_loras="",
+        civitai_resources=urls,
+        lora_resolver=lambda name: None,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=failing_fetch,
+    )
+    assert len(calls) == cnode.FETCH_BREAKER_LIMIT  # remaining lines skipped
+    payload = json.loads(report.resources_json)
+    assert [e["status"] for e in payload] == ["missing"] * 5
+
+
+def test_build_report_warns_beyond_image_saver_cap(tmp_path: Path) -> None:
+    hashes = "\n".join(f"{i:010d}" for i in range(31))
+    report = cnode.build_resource_report(
+        loaded_loras="",
+        civitai_resources=hashes,
+        lora_resolver=lambda name: None,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=_fake_fetch({}),
+    )
+    payload = json.loads(report.resources_json)
+    assert len(payload) == 31
+    assert "warning" not in payload[29]
+    assert "30-entry" in payload[30]["warning"]
+
+
 def test_sanitize_name_rules() -> None:
     assert cnode.sanitize_name("Anima: Detailer, v2", "FB12FB7B90") == "Anima Detailer v2"
     assert cnode.sanitize_name("vae", "FB12FB7B90") == "vae model"

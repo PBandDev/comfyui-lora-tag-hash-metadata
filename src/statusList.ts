@@ -10,6 +10,7 @@ export interface ResourceEntry {
   version_name?: string | null;
   weight?: number | null;
   unverified?: boolean;
+  warning?: string | null;
   error?: string | null;
 }
 
@@ -54,7 +55,8 @@ function rowLabel(entry: ResourceEntry): string {
     entry.weight === null || entry.weight === undefined ? "" : ` ×${entry.weight}`;
   const unverifiedPart = entry.unverified ? " — unverified" : "";
   const duplicatePart = entry.status === "duplicate" ? " — duplicate" : "";
-  return `${title}${typePart}${weightPart}${unverifiedPart}${duplicatePart}`;
+  const warningPart = entry.warning ? ` — ⚠ ${entry.warning}` : "";
+  return `${title}${typePart}${weightPart}${unverifiedPart}${duplicatePart}${warningPart}`;
 }
 
 export function buildStatusList(entries: ResourceEntry[]): HTMLDivElement {

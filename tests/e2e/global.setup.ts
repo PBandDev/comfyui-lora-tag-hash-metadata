@@ -32,15 +32,36 @@ async function isReady() {
   }
 }
 
-function stopExistingServer() {
+function processLooksLikeComfy(pid: number): boolean {
+  try {
+    const output =
+      process.platform === "win32"
+        ? execFileSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], {
+            encoding: "utf8",
+          })
+        : execFileSync("ps", ["-p", String(pid), "-o", "comm="], { encoding: "utf8" });
+    return /python|comfy/i.test(output);
+  } catch {
+    return false;
+  }
+}
+
+function stopExistingServer(): boolean {
   if (!existsSync(pidFile)) {
-    return;
+    return false;
   }
 
   const pid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
   if (Number.isNaN(pid)) {
     unlinkSync(pidFile);
-    return;
+    return false;
+  }
+
+  // PIDs get reused: a stale pidfile must never let us kill an unrelated
+  // process. If it no longer looks like our server, just drop the pidfile.
+  if (!processLooksLikeComfy(pid)) {
+    unlinkSync(pidFile);
+    return false;
   }
 
   try {
@@ -56,6 +77,7 @@ function stopExistingServer() {
   if (existsSync(pidFile)) {
     unlinkSync(pidFile);
   }
+  return true;
 }
 
 async function waitForReady() {
@@ -82,7 +104,20 @@ setup("start repo-local ComfyUI for e2e", async () => {
     );
   }
 
-  stopExistingServer();
+  const killedPrevious = stopExistingServer();
+  if (killedPrevious) {
+    // Give the OS a moment to release the port after the forced kill.
+    for (let i = 0; i < 10 && (await isReady()); i++) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+    }
+  }
+  if (await isReady()) {
+    throw new Error(
+      `Another server is already listening on ${e2eConfig.baseUrl} — refusing to run e2e ` +
+        "against it. Stop it or set COMFYUI_E2E_PORT to a free port.",
+    );
+  }
+
   mkdirSync(resolve(projectRoot, e2eConfig.workspaceDir), { recursive: true });
   mkdirSync(dirname(logFile), { recursive: true });
   rmSync(logFile, { force: true });

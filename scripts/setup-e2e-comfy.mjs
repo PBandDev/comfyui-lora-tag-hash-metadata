@@ -39,6 +39,17 @@ function run(command, args, label, options = {}) {
   });
 }
 
+// A symlink/junction here would redirect installs (and later deletions) to a
+// real ComfyUI outside the repo — refuse to operate through one.
+function assertNotSymlink(target, label) {
+  if (!existsSync(target)) {
+    return;
+  }
+  if (lstatSync(target).isSymbolicLink()) {
+    throw new Error(`${label} (${target}) is a symlink/junction — refusing to use a redirected path.`);
+  }
+}
+
 function ensureWorkspaceVenv() {
   if (existsSync(pythonBinary)) {
     return;
@@ -115,6 +126,9 @@ function ensureMountedCustomNode() {
   }
 }
 
+assertNotSymlink(resolve(projectRoot, ".e2e"), "e2e root");
+assertNotSymlink(comfyDir, "e2e ComfyUI workspace");
+assertNotSymlink(customNodesDir, "e2e custom_nodes dir");
 ensureWorkspaceVenv();
 ensureComfyCli();
 ensurePinnedComfyInstall();

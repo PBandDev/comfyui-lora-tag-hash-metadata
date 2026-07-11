@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import os
 import re
 import time
@@ -28,6 +29,12 @@ MODEL_TTL_SECONDS = 86400
 HTTP_TIMEOUT_SECONDS = 10.0
 # Cloudflare returns 403 for urllib's default "Python-urllib/x.y" agent.
 USER_AGENT = "comfyui-lora-tag-hash-metadata"
+# After this many consecutive fetch failures in one run, remaining uncached
+# lines are skipped instead of burning the full retry budget per line.
+FETCH_BREAKER_LIMIT = 2
+# Image Saver's parse_manual_hashes silently ignores entries past 30.
+IMAGE_SAVER_MANUAL_CAP = 30
+AUTOV2_RE = re.compile(r"^[0-9A-F]{10}$")
 
 URL_RE = re.compile(
     r"^https?://(?:www\.)?civitai\.(?:com|red|green)/models/(\d+)(?:/[^\s?]*)?(?:\?\S*)?$",
@@ -65,6 +72,15 @@ def parse_resource_lines(text: str) -> list[ResourceLine]:
         if (weight_match := WEIGHT_SUFFIX_RE.search(body)) is not None:
             weight = float(weight_match.group(1))
             body = body[: weight_match.start()].strip()
+            if not math.isfinite(weight):
+                lines.append(
+                    ResourceLine(
+                        raw=stripped,
+                        kind="invalid",
+                        error="weight overflows to a non-finite number",
+                    )
+                )
+                continue
         if (url_match := URL_RE.match(body)) is not None:
             query = parse_qs(urlsplit(body).query)
             version_raw = (query.get("modelVersionId") or [None])[0]
@@ -120,9 +136,11 @@ class NotFoundError(ResolveError):
 def default_fetch(path: str) -> object:
     token = os.environ.get("CIVITAI_API_TOKEN", "")
     last: Exception | None = None
+    saw_404 = False
     for delay in (0.0, 1.0, 2.0):
         if delay:
             time.sleep(delay)
+        not_found_count = 0
         for host in API_HOSTS:
             request = urllib.request.Request(host + path, headers={"User-Agent": USER_AGENT})
             if token:
@@ -132,10 +150,19 @@ def default_fetch(path: str) -> object:
                     return json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as err:
                 if err.code == 404:
-                    raise NotFoundError(f"not found: {path}") from err
+                    saw_404 = True
+                    not_found_count += 1
                 last = err
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as err:
+            # ValueError covers json.JSONDecodeError and UnicodeDecodeError
+            # (a proxy can return 200 with garbage bytes).
+            except (urllib.error.URLError, TimeoutError, ValueError) as err:
                 last = err
+        # A single-host 404 may be transient/stale; trust it only when every
+        # host agrees within one attempt round.
+        if not_found_count == len(API_HOSTS):
+            raise NotFoundError(f"not found: {path}") from last
+    if saw_404:
+        raise NotFoundError(f"not found: {path}") from last
     raise ResolveError(f"civitai api unreachable: {last}")
 
 
@@ -163,7 +190,7 @@ class ResolveCache:
         if not isinstance(entry, dict):
             return None
         fetched_at = entry.get("fetched_at")
-        if not isinstance(fetched_at, (int, float)):
+        if not isinstance(fetched_at, (int, float)) or not math.isfinite(fetched_at):
             return None
         if max_age is not None and time.time() - fetched_at > max_age:
             return None
@@ -171,9 +198,18 @@ class ResolveCache:
 
     def put(self, key: str, value: object) -> None:
         self._data[key] = {"fetched_at": time.time(), "value": value}
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._data), encoding="utf-8")
-        tmp.replace(self.path)
+        # Unique tmp name per writer so concurrent executions can't trample
+        # each other's tmp file; persistence is best-effort — a cache I/O
+        # failure must never abort node execution.
+        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}-{id(self):x}.tmp")
+        try:
+            tmp.write_text(json.dumps(self._data), encoding="utf-8")
+            tmp.replace(self.path)
+        except OSError:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 @dataclass(frozen=True)
@@ -192,20 +228,30 @@ class ResolvedResource:
         return self.line.weight
 
 
+def _file_autov2(file_entry: object) -> str | None:
+    if not isinstance(file_entry, dict):
+        return None
+    hashes = file_entry.get("hashes")
+    if not isinstance(hashes, dict):
+        return None
+    value = str(hashes.get("AutoV2") or "").upper()
+    # Emitting an unvalidated value downstream could inject extra CSV entries
+    # or exceed Image Saver's hash length cap.
+    return value if AUTOV2_RE.match(value) else None
+
+
 def _pick_autov2(files: list, file_id: int | None) -> str:
-    candidates = [
-        f
-        for f in files
-        if isinstance(f, dict) and isinstance(f.get("hashes"), dict) and f["hashes"].get("AutoV2")
-    ]
+    candidates = [f for f in files if _file_autov2(f) is not None]
     if file_id is not None:
         candidates = [f for f in candidates if f.get("id") == file_id]
     if not candidates:
         if file_id is not None:
-            raise ResolveError(f"no file with id {file_id} and an AutoV2 hash on this version")
-        raise ResolveError("no file with an AutoV2 hash on this version")
+            raise ResolveError(f"no file with id {file_id} and a valid AutoV2 hash on this version")
+        raise ResolveError("no file with a valid AutoV2 hash on this version")
     primary = next((f for f in candidates if f.get("primary")), candidates[0])
-    return str(primary["hashes"]["AutoV2"]).upper()
+    autov2 = _file_autov2(primary)
+    assert autov2 is not None
+    return autov2
 
 
 def _from_version_payload(line: ResourceLine, data: dict) -> ResolvedResource:
@@ -322,11 +368,31 @@ def build_resource_report(
     hash_parts = [from_v1.additional_hashes] if from_v1.additional_hashes else []
     resolved_names = [from_v1.resolved_loras] if from_v1.resolved_loras else []
     missing_parts = [from_v1.missing_loras] if from_v1.missing_loras else []
+    emitted_count = sum(1 for entry in entries if entry.get("status") == "resolved")
+
+    # Circuit breaker: once the API proves unreachable, stop burning the full
+    # retry budget on every remaining uncached line (30 lines could otherwise
+    # block the queue for ~30 minutes).
+    fetch_failures = 0
+
+    def guarded_fetch(path: str) -> object:
+        nonlocal fetch_failures
+        if fetch_failures >= FETCH_BREAKER_LIMIT:
+            raise ResolveError("civitai api unreachable (skipped after repeated failures)")
+        try:
+            result = fetch(path)
+        except NotFoundError:
+            raise
+        except ResolveError:
+            fetch_failures += 1
+            raise
+        fetch_failures = 0
+        return result
 
     for line in parse_resource_lines(civitai_resources or ""):
         entry: dict = {"kind": line.kind, "source": line.raw}
         try:
-            res = resolve_line(line, cache, fetch)
+            res = resolve_line(line, cache, guarded_fetch)
         except ResolveError as err:
             entry.update(status="missing", error=str(err))
             missing_parts.append(_escape_missing(line.raw))
@@ -351,6 +417,11 @@ def build_resource_report(
         seen_hashes.add(res.autov2.upper())
         hash_parts.append(format_entry(name, res.autov2, res.weight))
         resolved_names.append(name)
+        emitted_count += 1
+        if emitted_count > IMAGE_SAVER_MANUAL_CAP:
+            entry["warning"] = (
+                f"beyond Image Saver's {IMAGE_SAVER_MANUAL_CAP}-entry manual cap — may be ignored"
+            )
         entries.append(entry)
 
     return ResourceReport(

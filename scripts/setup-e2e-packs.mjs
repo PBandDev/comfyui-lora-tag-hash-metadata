@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { e2eConfig } from "../e2e.config.mjs";
@@ -20,6 +20,17 @@ const customNodesDir = join(comfyDir, "custom_nodes");
 function run(command, args, options = {}) {
   console.log(`[setup:packs] $ ${command} ${args.join(" ")}`);
   execFileSync(command, args, { cwd: projectRoot, stdio: "inherit", ...options });
+}
+
+// A symlink/junction here would redirect pack checkouts, settings writes and
+// fixture copies into a real ComfyUI outside the repo — refuse.
+function assertNotSymlink(target, label) {
+  if (!existsSync(target)) {
+    return;
+  }
+  if (lstatSync(target).isSymbolicLink()) {
+    throw new Error(`${label} (${target}) is a symlink/junction — refusing to use a redirected path.`);
+  }
 }
 
 function ensurePinnedPacks() {
@@ -83,11 +94,15 @@ function ensureFixtures() {
       existsSync(canonicalPath) &&
       createHash("sha256").update(readFileSync(canonicalPath)).digest("hex").toUpperCase() ===
         fixture.sha256;
-    if (!verified()) {
-      run("curl", ["-sfL", "-o", canonicalPath, fixture.url]);
-      if (!verified()) {
-        throw new Error(`sha256 mismatch for ${fixture.filename}`);
+    for (let attempt = 1; attempt <= 3 && !verified(); attempt++) {
+      try {
+        run("curl", ["-sfL", "--retry", "2", "-o", canonicalPath, fixture.url]);
+      } catch (error) {
+        if (attempt === 3) throw error;
       }
+    }
+    if (!verified()) {
+      throw new Error(`sha256 mismatch for ${fixture.filename}`);
     }
     // COPY into the workspace: the LoRA Manager scanner writes .metadata.json
     // sidecars next to loras, and the canonical fixtures dir must stay clean.
@@ -95,6 +110,9 @@ function ensureFixtures() {
   }
 }
 
+assertNotSymlink(resolve(projectRoot, ".e2e"), "e2e root");
+assertNotSymlink(comfyDir, "e2e ComfyUI workspace");
+assertNotSymlink(customNodesDir, "e2e custom_nodes dir");
 ensurePinnedPacks();
 writePortableLoraManagerSettings();
 installHarnessNodes();

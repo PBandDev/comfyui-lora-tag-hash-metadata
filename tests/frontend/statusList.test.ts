@@ -59,6 +59,14 @@ describe("buildStatusList", () => {
   it("renders empty state", () => {
     expect(buildStatusList([]).textContent).toContain("No resources");
   });
+
+  it("renders warning suffix on capped entries", () => {
+    const el = buildStatusList([
+      { ...entries[0], warning: "beyond Image Saver's 30-entry manual cap — may be ignored" },
+    ]);
+    expect(el.textContent).toContain("⚠");
+    expect(el.textContent).toContain("30-entry");
+  });
 });
 
 describe("parseStatusPayload", () => {
