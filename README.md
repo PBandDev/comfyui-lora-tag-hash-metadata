@@ -60,6 +60,21 @@ CD64AF8696
 urn:air:anima:lora:civitai:2767064@3114726
 ```
 
+### ＋ Add Resource picker
+
+The node's **＋ Add Resource** button opens a searchable picker so you never
+have to hand-copy URLs:
+
+- **CivitAI search** tab: live search (all content types, no filtering),
+  type chips, sort, load-more; picking a result appends a version-pinned URL
+  line to the textbox. Lora-ish results take an optional weight.
+- **Local · LoRA Manager** tab (shown only when
+  [LoRA Manager](https://github.com/willmiao/ComfyUI-Lora-Manager) is
+  installed): pick from your local loras — matched files insert their civitai
+  link, unmatched files insert their AutoV2 hash.
+- Entries already in the textbox show **Remove** instead of Add, so the picker
+  can also clean up. The textbox stays fully hand-editable either way.
+
 Inputs:
 
 - `loaded_loras` (optional link): `<lora:name:weight>` text, e.g. from LoRA

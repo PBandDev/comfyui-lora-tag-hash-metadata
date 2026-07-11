@@ -88,3 +88,7 @@ pnpm e2e:serve     # foreground; Ctrl+C to stop
    identically.
 10. **LOOK & FEEL** — row density, colors, link affordance, overflow behavior
     on 20+ lines.
+11. **Picker**: click ＋ Add Resource → browse feed appears → search "anima
+    detailer" → Add → Apply → a pinned URL line lands in the textbox; reopen →
+    the same card now says Remove; the Local tab lists your loras when LoRA
+    Manager is installed.
