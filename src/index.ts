@@ -1,5 +1,6 @@
 import type { ComfyApp } from "@comfyorg/comfyui-frontend-types";
 import { SETTINGS_IDS } from "./constants";
+import { openResourcePicker } from "./picker";
 import { buildStatusList, parseStatusPayload } from "./statusList";
 
 declare global {
@@ -21,9 +22,22 @@ interface StatusMessage {
   civitai_resources_status?: string[];
 }
 
+interface TextWidgetLike {
+  name: string;
+  value?: string | number | boolean | object;
+  callback?: (value: string) => void;
+}
+
 interface StatusNodeLike {
   size?: [number, number];
-  widgets?: { name: string }[];
+  widgets?: TextWidgetLike[];
+  addWidget?(
+    type: "button",
+    name: string,
+    value: string,
+    callback: () => void,
+    options: { serialize: boolean },
+  ): (TextWidgetLike & { serialize?: boolean }) | undefined;
   addDOMWidget?(
     name: string,
     type: string,
@@ -40,9 +54,11 @@ interface StatusNodeLike {
   setDirtyCanvas?(foreground: boolean, background: boolean): void;
   onNodeCreated?(): void;
   onExecuted?(message: StatusMessage): void;
+  onRemoved?(): void;
 }
 
 const statusHosts = new WeakMap<StatusNodeLike, HTMLDivElement>();
+const pickerClosers = new WeakMap<StatusNodeLike, () => void>();
 
 function createStatusHost(node: StatusNodeLike): HTMLDivElement | null {
   if (typeof node.addDOMWidget !== "function") {
@@ -65,6 +81,38 @@ function createStatusHost(node: StatusNodeLike): HTMLDivElement | null {
   host.replaceChildren(buildStatusList([]));
   statusHosts.set(node, host);
   return host;
+}
+
+function createPickerButton(node: StatusNodeLike): void {
+  const textWidget = node.widgets?.find((widget) => widget.name === "civitai_resources");
+  if (textWidget === undefined || typeof node.addWidget !== "function") {
+    return;
+  }
+  const button = node.addWidget(
+    "button",
+    "＋ Add Resource",
+    "",
+    () => {
+      const close = openResourcePicker({
+        getText: () => String(textWidget.value ?? ""),
+        setText: (value) => {
+          textWidget.value = value;
+          textWidget.callback?.(value);
+          node.setDirtyCanvas?.(true, true);
+        },
+      });
+      // null = a picker is already open; never overwrite the live closer.
+      if (close !== null) {
+        pickerClosers.set(node, close);
+      }
+    },
+    { serialize: false },
+  );
+  // The options flag alone doesn't keep the button out of widgets_values —
+  // mirror the existing DOM-widget pattern and pin it on the widget too.
+  if (button !== undefined) {
+    button.serialize = false;
+  }
 }
 
 function statusHostFor(node: StatusNodeLike): HTMLDivElement | null {
@@ -98,8 +146,15 @@ app.registerExtension({
     const originalCreated = proto.onNodeCreated;
     proto.onNodeCreated = function (this: StatusNodeLike) {
       originalCreated?.call(this);
+      createPickerButton(this);
       createStatusHost(this);
       syncNodeSize(this);
+    };
+    const originalRemoved = proto.onRemoved;
+    proto.onRemoved = function (this: StatusNodeLike) {
+      pickerClosers.get(this)?.();
+      pickerClosers.delete(this);
+      originalRemoved?.call(this);
     };
     const originalExecuted = proto.onExecuted;
     proto.onExecuted = function (this: StatusNodeLike, message: StatusMessage) {
