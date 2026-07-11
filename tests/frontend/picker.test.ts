@@ -140,6 +140,57 @@ describe("openResourcePicker", () => {
     await flush();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(document.querySelector(".clth-pk-overlay")).toBeNull();
+    // A leaked capture listener would stopImmediatePropagation and shield the
+    // next picker from Escape — reopen and prove the fresh one still closes.
+    open();
+    await flush();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector(".clth-pk-overlay")).toBeNull();
+  });
+
+  it("typing immediately invalidates the old cursor and Load more", async () => {
+    open();
+    await flush();
+    expect(document.querySelector(".clth-pk-more")).not.toBeNull();
+    const input = document.querySelector<HTMLInputElement>(".clth-pk-search");
+    if (input === null) throw new Error("no search input");
+    input.value = "anima";
+    input.dispatchEvent(new Event("input"));
+    // Before the debounce fires, pagination from the previous query is gone.
+    expect(document.querySelector(".clth-pk-more")).toBeNull();
+  });
+
+  it("locks version and weight controls while staged", async () => {
+    open();
+    await flush();
+    const card = document.querySelectorAll<HTMLElement>(".clth-pk-card")[0];
+    const weight = card.querySelector<HTMLInputElement>(".clth-pk-weight");
+    const select = card.querySelector<HTMLSelectElement>(".clth-pk-versions");
+    const add = card.querySelector<HTMLButtonElement>(".clth-pk-add");
+    if (weight === null || select === null || add === null) throw new Error("missing controls");
+    weight.value = "0.8";
+    add.click();
+    expect(weight.disabled).toBe(true);
+    expect(select.disabled).toBe(true);
+    add.click(); // unstage
+    expect(weight.disabled).toBe(false);
+    expect(select.disabled).toBe(false);
+  });
+
+  it("shows a search failure without crashing on non-Error rejections", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/lm/health-check")) return new Response("", { status: 404 });
+        return Promise.reject("boom");
+      }),
+    );
+    open();
+    await flush();
+    expect(document.querySelector(".clth-pk-status")?.textContent).toContain(
+      "Search failed: boom",
+    );
   });
 
   it("hides the Local tab when LM health-check fails", async () => {

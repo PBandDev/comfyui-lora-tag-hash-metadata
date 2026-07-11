@@ -95,7 +95,10 @@ test("a just-added version shows Remove on reopen and apply deletes it", async (
   await card.locator(".clth-pk-add").click();
   await page.locator(".clth-pk-apply").click();
   await expect(page.locator(".clth-pk-overlay")).toHaveCount(0);
-  expect(await textboxValue(page)).toMatch(/modelVersionId=\d+/);
+  const pinned = await textboxValue(page);
+  expect(pinned).toMatch(/modelVersionId=\d+/);
+  const versionId = /modelVersionId=(\d+)/.exec(pinned)?.[1] ?? "";
+  expect(versionId).not.toBe("");
 
   // Reopen on the same node: the same card must now offer Remove.
   await page.evaluate(() => {
@@ -107,8 +110,10 @@ test("a just-added version shows Remove on reopen and apply deletes it", async (
   });
   await page.fill(".clth-pk-search", "anima detailer");
   await secondSearch;
+  // Pin the card by the exact version id we inserted — live ranking can put
+  // a different "Anima Detailer"-titled model first between the two searches.
   const button = page
-    .locator(".clth-pk-card", { hasText: "Anima Detailer" })
+    .locator(".clth-pk-card", { has: page.locator(`option[value="${versionId}"]`) })
     .first()
     .locator(".clth-pk-add");
   await expect(button).toHaveText("Remove", { timeout: 30_000 });
@@ -123,11 +128,16 @@ test("local tab lists LM loras and inserts a line", async ({ page }) => {
   const localTab = page.locator(".clth-pk-tab-local");
   await expect(localTab).toBeVisible({ timeout: 15_000 });
   await localTab.click();
-  await expect(page.locator(".clth-pk-card").first()).toBeVisible({ timeout: 30_000 });
 
-  await page.locator(".clth-pk-card .clth-pk-add:not([disabled])").first().click();
+  // Pin to a sha-locked fixture (fixtures.lock.json) so this can't pass
+  // vacuously on an arbitrary cached row.
+  await page.fill(".clth-pk-search", "fisheye_slider_v10");
+  const row = page.locator(".clth-pk-card", { hasText: "fisheye_slider_v10" }).first();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.locator(".clth-pk-add:not([disabled])").click();
   await page.locator(".clth-pk-apply").click();
   const value = await textboxValue(page);
-  // Matched loras insert a pinned url; unmatched insert an AutoV2 hash.
-  expect(value).toMatch(/(modelVersionId=\d+|^[0-9A-F]{10}(\s|$))/m);
+  // The fixture inserts its civitai link when LM has it mapped, otherwise its
+  // exact AutoV2 hash — the sha-locked fixture makes the hash stable.
+  expect(value).toMatch(/(modelVersionId=\d+|^D6A3AC6F8A(\s|$))/m);
 });

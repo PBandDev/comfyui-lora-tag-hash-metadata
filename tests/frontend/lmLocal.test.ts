@@ -48,6 +48,7 @@ describe("searchLocalLoras", () => {
     expect(url.pathname).toBe("/api/lm/loras/list");
     expect(url.searchParams.get("search")).toBe("anima");
     expect(url.searchParams.get("fuzzy")).toBe("true");
+    expect(url.searchParams.get("page_size")).toBe("200");
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       displayName: "Anima Detailer",

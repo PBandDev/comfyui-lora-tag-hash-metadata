@@ -121,6 +121,10 @@ describe("searchModels", () => {
     );
     vi.stubGlobal("fetch", spy);
     await searchModels({}, new AbortController().signal);
-    expect(spy.mock.calls[0][1]?.headers).toBeUndefined();
+    const [input, init] = spy.mock.calls[0];
+    // A Request object could smuggle headers past an init-only check — the
+    // client must pass a plain string URL with no headers in init.
+    expect(typeof input).toBe("string");
+    expect(init?.headers).toBeUndefined();
   });
 });

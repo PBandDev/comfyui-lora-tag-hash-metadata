@@ -84,10 +84,12 @@ async function waitForLoraManagerScan(baseURL: string): Promise<void> {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${baseURL}/api/lm/loras/list?page_size=1`);
+      // Pin on a sha-locked fixture (fixtures.lock.json) — any cached row is
+      // not proof the scan surfaced OUR loras.
+      const response = await fetch(`${baseURL}/api/lm/loras/list?search=fisheye_slider_v10&fuzzy=true&page_size=10`);
       if (response.ok) {
-        const data = (await response.json()) as { items?: object[] };
-        if ((data.items?.length ?? 0) > 0) return;
+        const data = (await response.json()) as { items?: { file_name?: string }[] };
+        if (data.items?.some((item) => item.file_name === "fisheye_slider_v10") === true) return;
       }
     } catch {
       // server still warming up — keep polling
@@ -115,6 +117,9 @@ async function waitForReady() {
 }
 
 setup("start repo-local ComfyUI for e2e", async () => {
+  // Server startup (up to startupMs) + LM scan gate (up to 120s) both run in
+  // this one test — the global 60s timeout would kill cold starts.
+  setup.setTimeout(e2eConfig.timeouts.startupMs + 150_000);
   if (!existsSync(comfyBinary)) {
     throw new Error(
       "Missing repo-local comfy-cli. Run `pnpm setup:e2e` before Playwright starts.",

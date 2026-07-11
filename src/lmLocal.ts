@@ -38,7 +38,9 @@ export async function lmAvailable(): Promise<boolean> {
 }
 
 export async function searchLocalLoras(query: string, signal: AbortSignal): Promise<LocalLora[]> {
-  const params = new URLSearchParams({ page_size: "50" });
+  // One page, sized for real libraries; larger collections narrow via the
+  // server-side fuzzy search rather than paginating the browse feed.
+  const params = new URLSearchParams({ page_size: "200" });
   if (query.length > 0) {
     params.set("search", query);
     params.set("fuzzy", "true");

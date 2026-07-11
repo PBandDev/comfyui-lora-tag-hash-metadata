@@ -273,9 +273,16 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     // version re-listed after load-more) — sync every control bound to key.
     for (const card of body.querySelectorAll<HTMLElement>(".clth-pk-card")) {
       if (card.dataset.key !== key) continue;
-      card.setAttribute("data-staged", String(staged.has(key)));
+      const isStaged = staged.has(key);
+      card.setAttribute("data-staged", String(isStaged));
       const cardButton = card.querySelector<HTMLButtonElement>(".clth-pk-add");
       if (cardButton !== null) refreshButton(key, cardButton);
+      // Staged ops snapshot version + weight — lock the controls so the card
+      // can't silently drift from what Apply will actually write.
+      const versionSelect = card.querySelector<HTMLSelectElement>(".clth-pk-versions");
+      if (versionSelect !== null) versionSelect.disabled = isStaged;
+      const weightInput = card.querySelector<HTMLInputElement>(".clth-pk-weight");
+      if (weightInput !== null) weightInput.disabled = isStaged;
     }
     renderCount();
   }
@@ -337,7 +344,10 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
       card.dataset.key = `v:${versionId}`;
       inNodeChip.textContent = inNode ? "in node" : "other version in node";
       inNodeChip.style.display = inNode || otherVersionInNode ? "" : "none";
-      card.setAttribute("data-staged", String(staged.has(`v:${versionId}`)));
+      const isStaged = staged.has(`v:${versionId}`);
+      card.setAttribute("data-staged", String(isStaged));
+      versions.disabled = isStaged;
+      if (weight !== null) weight.disabled = isStaged;
       refreshButton(`v:${versionId}`, button);
     };
     versions.addEventListener("change", refresh);
@@ -443,7 +453,9 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
       toggleStage(key, { op: "add-line", line });
     });
     refreshButton(key, button);
-    card.setAttribute("data-staged", String(staged.has(key)));
+    const stagedNow = staged.has(key);
+    card.setAttribute("data-staged", String(stagedNow));
+    weight.disabled = stagedNow;
     return card;
   }
 
@@ -538,8 +550,12 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
         if (rows.length === 0) setStatus("No local loras found.");
       }
     } catch (error) {
-      if ((error as { name?: string }).name === "AbortError") return;
-      setStatus(`Search failed: ${(error as Error).message}`);
+      // Same staleness guard as the success path — a superseded request's
+      // failure must not stomp the newer load's UI.
+      if (seq !== loadSeq || closed) return;
+      if (error instanceof Error && error.name === "AbortError") return;
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(`Search failed: ${message}`);
     }
   }
 
@@ -614,6 +630,13 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
   tabCivitai.addEventListener("click", () => selectTab("civitai", localTabButton));
   search.addEventListener("input", () => {
     if (debounceHandle !== null) clearTimeout(debounceHandle);
+    // Typing invalidates the current result set immediately: drop the old
+    // cursor and stale continuations so "Load more" clicked during the
+    // debounce can't mix the new query with the old query's cursor.
+    loadSeq++;
+    controller?.abort();
+    cursor = null;
+    body.querySelector(".clth-pk-more")?.remove();
     debounceHandle = setTimeout(() => void load(true), DEBOUNCE_MS);
   });
   sortSelect.addEventListener("change", () => {
