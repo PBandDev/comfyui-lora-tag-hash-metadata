@@ -92,3 +92,8 @@ pnpm e2e:serve     # foreground; Ctrl+C to stop
     detailer" → Add → Apply → a pinned URL line lands in the textbox; reopen →
     the same card now says Remove; the Local tab lists your loras when LoRA
     Manager is installed.
+12. **Live preview**: after Apply the status list fills WITHOUT queueing
+    (rows marked "preview"); each row's ✕ deletes its line from the textbox;
+    ⟳ re-parses hand-typed lines; reload the page → the list re-renders from
+    the saved workflow. Searching gibberish → "No results were returned by
+    CivitAI's public API…" with a link to the same search on civitai.com.

@@ -74,6 +74,18 @@ have to hand-copy URLs:
   link, unmatched files insert their AutoV2 hash.
 - Entries already in the textbox show **Remove** instead of Add, so the picker
   can also clean up. The textbox stays fully hand-editable either way.
+- Result names link to their civitai page; lora-ish results take an optional
+  weight (the small `wt` box).
+- When a query returns nothing: civitai's public API hides some models
+  (e.g. flagged ones) — the picker links the same search on the civitai site.
+  Pasting such a model's version-pinned URL into the textbox still credits it.
+
+The in-node status list updates **live**: picker applies, the per-row **✕**
+(removes that line from the textbox), and the **⟳** button all re-parse
+`civitai_resources` through the node's own resolver + cache — no queueing
+needed. Rows are marked *preview* until a real run finalizes them (a run also
+dedups against `loaded_loras`). Loading a saved workflow re-renders the list
+the same way.
 
 Inputs:
 
