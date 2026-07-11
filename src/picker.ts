@@ -95,6 +95,8 @@ const PICKER_STYLES = `
   font-weight:600;font-size:12px;line-height:1.3;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
 }
+.clth-pk-name a{color:inherit;text-decoration:none}
+.clth-pk-name a:hover{color:var(--p-primary-color,#7aa2f7);text-decoration:underline}
 .clth-pk-meta{font-size:10.5px;color:var(--descrip-text,#999);display:flex;gap:8px;flex-wrap:wrap}
 .clth-pk-innode{
   color:var(--p-primary-color,#7aa2f7);
@@ -106,6 +108,8 @@ const PICKER_STYLES = `
   border:1px solid var(--border-color,#4e4e4e);border-radius:5px;
   color:var(--fg-color,#fff);font-size:10.5px;padding:3px 4px;font-family:inherit;
 }
+.clth-pk-wt{display:flex;align-items:center;gap:3px}
+.clth-pk-wt-label{color:var(--descrip-text,#999);font-size:9.5px;font-weight:600}
 .clth-pk-weight{
   width:46px;flex:none;background:var(--comfy-menu-bg,#2a2a2a);
   border:1px solid var(--border-color,#4e4e4e);border-radius:5px;
@@ -122,6 +126,7 @@ const PICKER_STYLES = `
   color:var(--descrip-text,#999);font-family:inherit;
 }
 .clth-pk-status{color:var(--descrip-text,#999);text-align:center;padding:14px;font-size:11.5px}
+.clth-pk-status a{color:var(--p-primary-color,#7aa2f7)}
 .clth-pk-foot{
   display:flex;align-items:center;gap:10px;
   padding:10px 12px;border-top:1px solid var(--border-color,#4e4e4e);
@@ -298,7 +303,13 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     const card = el("div", "clth-pk-card");
     card.appendChild(thumbEl(model.thumbnail, model.type === "Workflows" ? "W" : model.type[0] ?? "?"));
     const info = el("div", "clth-pk-info");
-    info.appendChild(el("div", "clth-pk-name", model.name));
+    const nameDiv = el("div", "clth-pk-name");
+    const nameLink = document.createElement("a");
+    nameLink.textContent = model.name;
+    nameLink.target = "_blank";
+    nameLink.rel = "noopener";
+    nameDiv.appendChild(nameLink);
+    info.appendChild(nameDiv);
     const meta = el("div", "clth-pk-meta");
     meta.appendChild(el("span", "", model.creator));
     meta.appendChild(el("span", "", `⭳ ${model.downloads.toLocaleString("en-US")}`));
@@ -320,12 +331,16 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     ctl.appendChild(versions);
     let weight: HTMLInputElement | null = null;
     if (typeAcceptsWeight(model.type)) {
+      const wtLabel = el("label", "clth-pk-wt");
+      wtLabel.appendChild(el("span", "clth-pk-wt-label", "wt"));
       weight = document.createElement("input");
       weight.className = "clth-pk-weight";
       weight.placeholder = "1.0";
       weight.inputMode = "decimal";
+      weight.title = "LoRA weight — blank for none";
       weight.setAttribute("aria-label", "Weight");
-      ctl.appendChild(weight);
+      wtLabel.appendChild(weight);
+      ctl.appendChild(wtLabel);
     }
     const button = el("button", "clth-pk-add", "Add");
     ctl.appendChild(button);
@@ -335,6 +350,7 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     const currentVersionId = (): number => Number(versions.value || model.versions[0].id);
     const refresh = (): void => {
       const versionId = currentVersionId();
+      nameLink.href = `https://civitai.com/models/${model.id}?modelVersionId=${versionId}`;
       const inNode = identities.versionIds.has(versionId);
       // A different version of this model being present is a hint, not a
       // dedup: two versions are legitimately separate credits.
@@ -375,7 +391,8 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     const card = el("div", "clth-pk-card");
     card.appendChild(thumbEl(lora.previewUrl, "L"));
     const info = el("div", "clth-pk-info");
-    info.appendChild(el("div", "clth-pk-name", lora.displayName));
+    const nameDiv = el("div", "clth-pk-name");
+    info.appendChild(nameDiv);
     const meta = el("div", "clth-pk-meta");
     meta.appendChild(el("span", "", lora.folder.length > 0 ? lora.folder : lora.fileName));
     const autov2 = lora.sha256 !== null ? lora.sha256.slice(0, 10).toUpperCase() : null;
@@ -391,12 +408,16 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     info.appendChild(meta);
 
     const ctl = el("div", "clth-pk-ctl");
+    const wtLabel = el("label", "clth-pk-wt");
+    wtLabel.appendChild(el("span", "clth-pk-wt-label", "wt"));
     const weight = document.createElement("input");
     weight.className = "clth-pk-weight";
     weight.placeholder = "1.0";
     weight.inputMode = "decimal";
+    weight.title = "LoRA weight — blank for none";
     weight.setAttribute("aria-label", "Weight");
-    ctl.appendChild(weight);
+    wtLabel.appendChild(weight);
+    ctl.appendChild(wtLabel);
     const button = el("button", "clth-pk-add", "Add");
     ctl.appendChild(button);
     info.appendChild(ctl);
@@ -409,6 +430,16 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
       lora.versionId !== null && lora.modelId !== null
         ? { modelId: lora.modelId, versionId: lora.versionId }
         : null;
+    if (linkIds !== null) {
+      const nameLink = document.createElement("a");
+      nameLink.textContent = lora.displayName;
+      nameLink.href = `https://civitai.com/models/${linkIds.modelId}?modelVersionId=${linkIds.versionId}`;
+      nameLink.target = "_blank";
+      nameLink.rel = "noopener";
+      nameDiv.appendChild(nameLink);
+    } else {
+      nameDiv.textContent = lora.displayName;
+    }
     const inNodeAsVersion =
       lora.versionId !== null && identities.versionIds.has(lora.versionId);
     const inNodeAsHash =
@@ -495,6 +526,25 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     if (message !== null) body.appendChild(el("div", "clth-pk-status", message));
   }
 
+  // Civitai's public search endpoint hides much of the catalog; when it hands
+  // back nothing, point people at the site's own search for the same term.
+  // Carries clth-pk-status so the next load's setStatus(null) clears it.
+  function setCivitaiEmpty(): void {
+    body.querySelector(".clth-pk-status")?.remove();
+    const term = search.value.trim();
+    const empty = el("div", "clth-pk-status clth-pk-empty");
+    empty.append(
+      "No results were returned by CivitAI's public API—additional models may be available on ",
+    );
+    const link = document.createElement("a");
+    link.textContent = "CivitAI";
+    link.href = `https://civitai.com/search/models?sortBy=models_v9&query=${encodeURIComponent(term)}`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    empty.append(link, ".");
+    body.appendChild(empty);
+  }
+
   async function load(reset: boolean): Promise<void> {
     // An explicit load supersedes any pending debounced one and any in-flight
     // request; the sequence number drops stale continuations that resolved
@@ -532,7 +582,7 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
           more.addEventListener("click", () => void load(false));
           body.appendChild(more);
         }
-        if (cards.length === 0) setStatus("No results.");
+        if (cards.length === 0) setCivitaiEmpty();
       } else {
         const rows = await searchLocalLoras(search.value.trim(), controller.signal);
         if (seq !== loadSeq || closed) return;

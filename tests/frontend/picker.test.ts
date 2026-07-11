@@ -265,4 +265,66 @@ describe("openResourcePicker", () => {
     await flush();
     expect(document.querySelectorAll(".clth-pk-overlay")).toHaveLength(1);
   });
+
+  it("offers a CivitAI deep link when the public API returns nothing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/lm/health-check")) return new Response("", { status: 404 });
+        return new Response(JSON.stringify({ items: [], metadata: {} }), { status: 200 });
+      }),
+    );
+    open();
+    await flush();
+    const empty = document.querySelector<HTMLElement>(".clth-pk-empty");
+    expect(empty).not.toBeNull();
+    expect(empty?.textContent).toContain("additional models may be available on");
+    const link = empty?.querySelector<HTMLAnchorElement>("a");
+    expect(link?.textContent).toBe("CivitAI");
+    expect(link?.target).toBe("_blank");
+    // Empty search box → the deep link query is left blank.
+    expect(link?.getAttribute("href")).toMatch(/query=$/);
+  });
+
+  it("encodes the typed query into the empty-state CivitAI link", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/lm/health-check")) return new Response("", { status: 404 });
+        return new Response(JSON.stringify({ items: [], metadata: {} }), { status: 200 });
+      }),
+    );
+    open();
+    await vi.advanceTimersByTimeAsync(0);
+    const input = document.querySelector<HTMLInputElement>(".clth-pk-search");
+    if (input === null) throw new Error("no search input");
+    input.value = "diana pragmata";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(350);
+    const link = document.querySelector<HTMLAnchorElement>(".clth-pk-empty a");
+    expect(link?.getAttribute("href")).toContain("query=diana%20pragmata");
+  });
+
+  it("labels the weight input on lora cards but not on checkpoints", async () => {
+    open();
+    await flush();
+    const cards = document.querySelectorAll<HTMLElement>(".clth-pk-card");
+    const label = cards[0].querySelector<HTMLElement>(".clth-pk-wt-label");
+    expect(label?.textContent).toBe("wt");
+    expect(cards[1].querySelector(".clth-pk-wt-label")).toBeNull();
+  });
+
+  it("links the card name to the civitai model page for the selected version", async () => {
+    open();
+    await flush();
+    const link = document
+      .querySelectorAll<HTMLElement>(".clth-pk-card")[0]
+      .querySelector<HTMLAnchorElement>(".clth-pk-name a");
+    expect(link?.getAttribute("href")).toBe(
+      "https://civitai.com/models/2767064?modelVersionId=3114726",
+    );
+  });
 });
