@@ -158,3 +158,92 @@ def test_parse_rejects_bare_ids_and_junk() -> None:
 def test_parse_air_file_id_suffix() -> None:
     (line,) = parse_resource_lines("urn:air:sdxl:lora:civitai:111@222+333")
     assert (line.kind, line.model_id, line.version_id, line.file_id) == ("air", 111, 222, 333)
+
+
+def _fake_fetch(payloads: dict[str, object]):
+    calls: list[str] = []
+
+    def fetch(path: str) -> object:
+        calls.append(path)
+        if path not in payloads:
+            raise cnode.NotFoundError(f"not found: {path}")
+        return payloads[path]
+
+    fetch.calls = calls
+    return fetch
+
+
+MODEL_2767064 = {
+    "id": 2767064,
+    "name": "Anima Detailer",
+    "type": "LORA",
+    "modelVersions": [
+        {
+            "id": 3114726,
+            "name": "v0_8",
+            "index": 0,
+            "files": [
+                {
+                    "id": 2994936,
+                    "name": "x.safetensors",
+                    "primary": True,
+                    "hashes": {"AutoV2": "CD64AF8696"},
+                }
+            ],
+        }
+    ],
+}
+VERSION_3114726 = {
+    "id": 3114726,
+    "modelId": 2767064,
+    "name": "v0_8",
+    "model": {"name": "Anima Detailer", "type": "LORA"},
+    "files": [{"id": 2994936, "hashes": {"AutoV2": "CD64AF8696"}}],
+}
+
+
+def test_resolve_unpinned_url_uses_latest_version(tmp_path: Path) -> None:
+    cache = cnode.ResolveCache(tmp_path / "cache.json")
+    fetch = _fake_fetch({"/api/v1/models/2767064": MODEL_2767064})
+    (line,) = parse_resource_lines("https://civitai.com/models/2767064")
+    res = cnode.resolve_line(line, cache, fetch)
+    assert (res.name, res.autov2, res.version_id, res.type) == (
+        "Anima Detailer",
+        "CD64AF8696",
+        3114726,
+        "LORA",
+    )
+
+
+def test_resolve_pinned_uses_version_endpoint_and_caches_forever(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache = cnode.ResolveCache(tmp_path / "cache.json")
+    fetch = _fake_fetch({"/api/v1/model-versions/3114726": VERSION_3114726})
+    (line,) = parse_resource_lines("https://civitai.com/models/2767064?modelVersionId=3114726")
+    cnode.resolve_line(line, cache, fetch)
+    monkeypatch.setattr(cnode.time, "time", lambda: cnode.time_real() + 10 * 365 * 86400)
+    res = cnode.resolve_line(line, cnode.ResolveCache(tmp_path / "cache.json"), _fake_fetch({}))
+    assert res.autov2 == "CD64AF8696"  # served from persisted cache, no fetch
+
+
+def test_unpinned_model_cache_expires_after_24h(tmp_path: Path, monkeypatch) -> None:
+    cache_file = tmp_path / "cache.json"
+    fetch = _fake_fetch({"/api/v1/models/2767064": MODEL_2767064})
+    (line,) = parse_resource_lines("https://civitai.com/models/2767064")
+    cnode.resolve_line(line, cnode.ResolveCache(cache_file), fetch)
+    monkeypatch.setattr(cnode.time, "time", lambda: cnode.time_real() + 86401)
+    cnode.resolve_line(line, cnode.ResolveCache(cache_file), fetch)
+    assert fetch.calls.count("/api/v1/models/2767064") == 2
+
+
+def test_resolve_404_reports_missing(tmp_path: Path) -> None:
+    (line,) = parse_resource_lines("https://civitai.com/models/999999999")
+    with pytest.raises(cnode.ResolveError, match="not found"):
+        cnode.resolve_line(line, cnode.ResolveCache(tmp_path / "c.json"), _fake_fetch({}))
+
+
+def test_hash_line_survives_failed_lookup(tmp_path: Path) -> None:
+    (line,) = parse_resource_lines("D6A3AC6F8A")
+    res = cnode.resolve_line(line, cnode.ResolveCache(tmp_path / "c.json"), _fake_fetch({}))
+    assert (res.autov2, res.name, res.unverified) == ("D6A3AC6F8A", "D6A3AC6F8A", True)
