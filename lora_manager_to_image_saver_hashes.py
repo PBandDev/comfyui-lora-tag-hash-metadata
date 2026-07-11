@@ -28,6 +28,7 @@ class HashBridgeResult:
     additional_hashes: str
     resolved_loras: str
     missing_loras: str
+    entries: tuple = ()
 
 
 def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
@@ -111,22 +112,50 @@ def build_additional_hashes(
     formatted_hashes: list[str] = []
     resolved_loras: list[str] = []
     missing_loras: list[str] = []
+    entries: list[dict] = []
 
     for name, weight in deduped.items():
         if "," in name:
             missing_loras.append(_format_missing_name(name))
+            entries.append(
+                {
+                    "kind": "lora",
+                    "name": name,
+                    "status": "missing",
+                    "error": "lora names cannot contain commas",
+                }
+            )
             continue
         resolved_path = resolver(name)
         if resolved_path is None:
             missing_loras.append(_format_missing_name(name))
+            entries.append(
+                {
+                    "kind": "lora",
+                    "name": name,
+                    "status": "missing",
+                    "error": "not found in loras folders",
+                }
+            )
             continue
-        formatted_hashes.append(f"{name}:{sha256_10(resolved_path)}:{weight}")
+        file_hash = sha256_10(resolved_path)
+        formatted_hashes.append(f"{name}:{file_hash}:{weight}")
         resolved_loras.append(name)
+        entries.append(
+            {
+                "kind": "lora",
+                "name": name,
+                "hash": file_hash,
+                "weight": weight,
+                "status": "resolved",
+            }
+        )
 
     return HashBridgeResult(
         additional_hashes=",".join(formatted_hashes),
         resolved_loras=",".join(resolved_loras),
         missing_loras=",".join(missing_loras),
+        entries=tuple(entries),
     )
 
 

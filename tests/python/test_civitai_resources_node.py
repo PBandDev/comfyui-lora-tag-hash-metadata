@@ -247,3 +247,62 @@ def test_hash_line_survives_failed_lookup(tmp_path: Path) -> None:
     (line,) = parse_resource_lines("D6A3AC6F8A")
     res = cnode.resolve_line(line, cnode.ResolveCache(tmp_path / "c.json"), _fake_fetch({}))
     assert (res.autov2, res.name, res.unverified) == ("D6A3AC6F8A", "D6A3AC6F8A", True)
+
+
+def test_sanitize_name_rules() -> None:
+    assert cnode.sanitize_name("Anima: Detailer, v2", "FB12FB7B90") == "Anima Detailer v2"
+    assert cnode.sanitize_name("vae", "FB12FB7B90") == "vae model"
+    assert cnode.sanitize_name("  ", "FB12FB7B90") == "FB12FB7B90"
+
+
+def test_emit_weightless_by_default_and_explicit_weight() -> None:
+    assert cnode.format_entry("Anima Detailer", "CD64AF8696", None) == "Anima Detailer:CD64AF8696"
+    assert (
+        cnode.format_entry("Anima Detailer", "CD64AF8696", 0.8) == "Anima Detailer:CD64AF8696:0.8"
+    )
+
+
+def test_emit_all_decimal_hash_forces_weight() -> None:
+    assert cnode.format_entry("X", "1234567890", None) == "X:1234567890:1.0"
+
+
+def test_build_report_dedups_by_hash_lora_wins(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    foo.write_bytes(b"abc")
+    autov2 = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    fetch = _fake_fetch(
+        {
+            "/api/v1/model-versions/by-hash/"
+            + autov2: {
+                "id": 1,
+                "modelId": 2,
+                "name": "v1",
+                "model": {"name": "Foo", "type": "LORA"},
+                "files": [{"id": 3, "hashes": {"AutoV2": autov2}}],
+            }
+        }
+    )
+    report = cnode.build_resource_report(
+        loaded_loras="<lora:foo:0.8>",
+        civitai_resources=autov2,
+        lora_resolver=lambda name: str(foo) if name == "foo" else None,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=fetch,
+    )
+    assert report.additional_hashes == f"foo:{autov2}:0.8"  # single entry, lora weight kept
+    payload = json.loads(report.resources_json)
+    assert [e["status"] for e in payload] == ["resolved", "duplicate"]
+
+
+def test_build_report_soft_fails_and_escapes_missing(tmp_path: Path) -> None:
+    report = cnode.build_resource_report(
+        loaded_loras="",
+        civitai_resources="https://civitai.com/models/999999999\nnot,a url",
+        lora_resolver=lambda name: None,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=_fake_fetch({}),
+    )
+    assert report.additional_hashes == ""
+    assert report.missing == "https://civitai.com/models/999999999,not\\,a url"
+    payload = json.loads(report.resources_json)
+    assert all(e["status"] == "missing" and e["error"] for e in payload)

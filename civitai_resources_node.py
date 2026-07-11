@@ -15,6 +15,11 @@ try:
 except ImportError:
     folder_paths = None
 
+if __package__:
+    from .lora_manager_to_image_saver_hashes import build_additional_hashes, resolve_lora_path
+else:
+    from lora_manager_to_image_saver_hashes import build_additional_hashes, resolve_lora_path
+
 time_real = time.time
 API_HOSTS = ("https://civitai.com", "https://civitai.red")
 MODEL_TTL_SECONDS = 86400
@@ -263,4 +268,89 @@ def resolve_line(line: ResourceLine, cache: ResolveCache, fetch=default_fetch) -
         model_id=cached.get("id"),
         version_id=latest.get("id"),
         version_name=str(latest.get("name") or ""),
+    )
+
+
+def sanitize_name(name: str, fallback: str) -> str:
+    cleaned = re.sub(r"\s+", " ", re.sub(r"[,:]", " ", name)).strip()
+    if not cleaned:
+        return fallback
+    if cleaned.lower() == "vae":
+        return f"{cleaned} model"
+    return cleaned
+
+
+def format_entry(name: str, autov2: str, weight: float | None) -> str:
+    if weight is None and autov2.isdigit():
+        # Image Saver parses a trailing all-decimal token as a weight, which
+        # would swallow the hash itself — pin an explicit weight instead.
+        weight = 1.0
+    suffix = f":{weight}" if weight is not None else ""
+    return f"{name}:{autov2}{suffix}"
+
+
+def _escape_missing(raw: str) -> str:
+    return raw.replace("\\", "\\\\").replace(",", "\\,")
+
+
+@dataclass(frozen=True)
+class ResourceReport:
+    additional_hashes: str
+    resolved: str
+    missing: str
+    resources_json: str
+
+
+def build_resource_report(
+    loaded_loras: str,
+    civitai_resources: str,
+    lora_resolver=None,
+    cache: ResolveCache | None = None,
+    fetch=default_fetch,
+) -> ResourceReport:
+    from_v1 = build_additional_hashes(loaded_loras or "", lora_resolver or resolve_lora_path)
+    cache = cache or ResolveCache()
+    entries: list[dict] = [dict(entry) for entry in from_v1.entries]
+    seen_hashes = {
+        str(entry["hash"]).upper() for entry in entries if entry.get("hash")
+    }
+    hash_parts = [from_v1.additional_hashes] if from_v1.additional_hashes else []
+    resolved_names = [from_v1.resolved_loras] if from_v1.resolved_loras else []
+    missing_parts = [from_v1.missing_loras] if from_v1.missing_loras else []
+
+    for line in parse_resource_lines(civitai_resources or ""):
+        entry: dict = {"kind": line.kind, "source": line.raw}
+        try:
+            res = resolve_line(line, cache, fetch)
+        except ResolveError as err:
+            entry.update(status="missing", error=str(err))
+            missing_parts.append(_escape_missing(line.raw))
+            entries.append(entry)
+            continue
+        name = sanitize_name(res.name, res.autov2)
+        entry.update(
+            status="resolved",
+            name=name,
+            type=res.type,
+            hash=res.autov2,
+            model_id=res.model_id,
+            version_id=res.version_id,
+            version_name=res.version_name,
+            weight=res.weight,
+            unverified=res.unverified,
+        )
+        if res.autov2.upper() in seen_hashes:
+            entry["status"] = "duplicate"
+            entries.append(entry)
+            continue
+        seen_hashes.add(res.autov2.upper())
+        hash_parts.append(format_entry(name, res.autov2, res.weight))
+        resolved_names.append(name)
+        entries.append(entry)
+
+    return ResourceReport(
+        additional_hashes=",".join(hash_parts),
+        resolved=",".join(resolved_names),
+        missing=",".join(missing_parts),
+        resources_json=json.dumps(entries),
     )
