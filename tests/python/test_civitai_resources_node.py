@@ -578,3 +578,57 @@ def test_build_report_soft_fails_and_escapes_missing(tmp_path: Path) -> None:
     assert report.missing == "https://civitai.com/models/999999999,not\\,a url"
     payload = json.loads(report.resources_json)
     assert all(e["status"] == "missing" and e["error"] for e in payload)
+
+
+def test_preview_resources_json_excludes_loras_and_resolves(tmp_path: Path) -> None:
+    fetch = _fake_fetch({"/api/v1/model-versions/3114726": VERSION_3114726})
+    url_line = "https://civitai.com/models/2767064?modelVersionId=3114726"
+    text = f"# a comment\n\n{url_line}\n"
+    out = cnode.preview_resources_json(
+        text,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=fetch,
+    )
+    payload = json.loads(out)
+    # loaded_loras is unknown at preview time, so no lora entries leak in.
+    assert len(payload) == 1
+    assert all(e["kind"] != "lora" for e in payload)
+    assert payload[0]["source"] == url_line
+    assert payload[0]["status"] == "resolved"
+
+
+def test_preview_resources_json_marks_duplicate(tmp_path: Path) -> None:
+    hash_payload = {
+        "id": 3114726,
+        "modelId": 2767064,
+        "name": "v0_8",
+        "model": {"name": "Anima Detailer", "type": "LORA"},
+        "files": [{"id": 2994936, "hashes": {"AutoV2": "CD64AF8696"}}],
+    }
+    fetch = _fake_fetch(
+        {
+            "/api/v1/model-versions/3114726": VERSION_3114726,
+            "/api/v1/model-versions/by-hash/CD64AF8696": hash_payload,
+        }
+    )
+    text = "https://civitai.com/models/2767064?modelVersionId=3114726\nCD64AF8696\n"
+    out = cnode.preview_resources_json(
+        text,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=fetch,
+    )
+    payload = json.loads(out)
+    assert [e["status"] for e in payload] == ["resolved", "duplicate"]
+
+
+def test_preview_resources_json_reports_missing(tmp_path: Path) -> None:
+    url_line = "https://civitai.com/models/999999999"
+    out = cnode.preview_resources_json(
+        f"{url_line}\n",
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=_fake_fetch({}),
+    )
+    payload = json.loads(out)
+    assert len(payload) == 1
+    assert payload[0]["status"] == "missing"
+    assert payload[0]["source"] == url_line

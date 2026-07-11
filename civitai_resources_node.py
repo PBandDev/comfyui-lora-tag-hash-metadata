@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 import math
@@ -474,6 +475,16 @@ def build_resource_report(
     )
 
 
+def preview_resources_json(
+    civitai_resources: str,
+    cache: ResolveCache | None = None,
+    fetch=None,
+) -> str:
+    """Entries payload for the frontend live preview — same pipeline as a run,
+    minus loaded_loras (only known at execution time)."""
+    return build_resource_report("", civitai_resources, cache=cache, fetch=fetch).resources_json
+
+
 class CivitaiResourcesToHashMetadata(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -516,3 +527,25 @@ class CivitaiResourcesToHashMetadata(io.ComfyNode):
             report.resources_json,
             ui={"civitai_resources_status": [report.resources_json]},
         )
+
+
+def _register_preview_route() -> None:
+    try:
+        from aiohttp import web
+        from server import PromptServer  # noqa: PLC0415 - only exists inside ComfyUI
+    except Exception:
+        return
+
+    @PromptServer.instance.routes.post("/clth/preview")
+    async def clth_preview(request):
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        text = str(data.get("text", "")) if isinstance(data, dict) else ""
+        loop = asyncio.get_running_loop()
+        payload = await loop.run_in_executor(None, preview_resources_json, text)
+        return web.Response(text=payload, content_type="application/json")
+
+
+_register_preview_route()
