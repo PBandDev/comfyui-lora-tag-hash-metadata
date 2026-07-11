@@ -250,7 +250,7 @@ def test_hash_line_survives_failed_lookup(tmp_path: Path) -> None:
     assert (res.autov2, res.name, res.unverified) == ("D6A3AC6F8A", "D6A3AC6F8A", True)
 
 
-def test_default_fetch_sends_custom_user_agent(monkeypatch) -> None:
+def test_default_fetch_sends_no_auth_even_with_token_env(monkeypatch) -> None:
     captured: list = []
 
     class _Response:
@@ -270,17 +270,15 @@ def test_default_fetch_sends_custom_user_agent(monkeypatch) -> None:
         return _Response()
 
     monkeypatch.setattr(cnode.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
+    # Token support was removed: every endpoint used is public, and the header
+    # must never be sent even when a token exists in the environment.
+    monkeypatch.setenv("CIVITAI_API_TOKEN", "should-be-ignored")
     cnode.default_fetch("/api/v1/model-versions/1")
 
     request = captured[0]
     # Cloudflare 403s urllib's default Python-urllib agent.
     assert request.get_header("User-agent") == cnode.USER_AGENT
     assert request.get_header("Authorization") is None
-
-    monkeypatch.setenv("CIVITAI_API_TOKEN", "test-token")
-    cnode.default_fetch("/api/v1/model-versions/1")
-    assert captured[1].get_header("Authorization") == "Bearer test-token"
 
 
 def test_parse_rejects_non_finite_weight() -> None:
@@ -365,7 +363,6 @@ def test_default_fetch_single_host_404_falls_through_to_other_host(monkeypatch) 
         }
     )
     monkeypatch.setattr(cnode.urllib.request, "urlopen", stub)
-    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
     assert cnode.default_fetch("/api/v1/model-versions/1") == {"id": 1}
 
 
@@ -377,7 +374,6 @@ def test_default_fetch_404_on_all_hosts_raises_not_found(monkeypatch) -> None:
         }
     )
     monkeypatch.setattr(cnode.urllib.request, "urlopen", stub)
-    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
     with pytest.raises(cnode.NotFoundError):
         cnode.default_fetch("/api/v1/model-versions/1")
     assert len(stub.calls) == 2  # no pointless retries once both hosts agree
@@ -392,7 +388,6 @@ def test_default_fetch_invalid_utf8_is_soft_resolve_error(monkeypatch) -> None:
     )
     monkeypatch.setattr(cnode.urllib.request, "urlopen", stub)
     monkeypatch.setattr(cnode.time, "sleep", lambda seconds: None)
-    monkeypatch.delenv("CIVITAI_API_TOKEN", raising=False)
     with pytest.raises(cnode.ResolveError, match="unreachable"):
         cnode.default_fetch("/api/v1/model-versions/1")
 

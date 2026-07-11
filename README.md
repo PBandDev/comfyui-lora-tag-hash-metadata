@@ -102,8 +102,6 @@ Behavior:
 - names are sanitized for Image Saver (`,`/`:` stripped, never literally
   `vae`), and all-decimal hashes get an explicit `:1.0` so the hash can't be
   misparsed as a weight
-- `CIVITAI_API_TOKEN` env var is honored if set (Authorization bearer);
-  never required for public metadata
 
 > **Image Saver footgun:** `Name:HASH:Weight` (3-part) entries are only
 > parsed when Image Saver Metadata's `download_civitai_data` is **True**.

@@ -138,7 +138,6 @@ class NotFoundError(ResolveError):
 
 
 def default_fetch(path: str) -> object:
-    token = os.environ.get("CIVITAI_API_TOKEN", "")
     last: Exception | None = None
     saw_404 = False
     for delay in (0.0, 1.0, 2.0):
@@ -147,8 +146,6 @@ def default_fetch(path: str) -> object:
         not_found_count = 0
         for host in API_HOSTS:
             request = urllib.request.Request(host + path, headers={"User-Agent": USER_AGENT})
-            if token:
-                request.add_header("Authorization", f"Bearer {token}")
             try:
                 with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
                     return json.loads(response.read().decode("utf-8"))
