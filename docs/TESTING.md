@@ -95,7 +95,8 @@ pnpm e2e:serve     # foreground; Ctrl+C to stop
 12. **Live preview**: after Apply the status list fills WITHOUT queueing
     (note: "queue a prompt to see final resource list"); each row's ✕ deletes
     its line from the textbox; ⟳ Refresh resources (under ＋ Add Resource)
-    re-parses hand-typed lines; after a run, `loaded_loras` rows stay in the
-    list through refreshes; reload the page → the list re-renders from the
-    saved workflow. Searching gibberish → "No results were returned by
+    re-parses hand-typed lines; with an LM loader linked to `loaded_loras`,
+    ⟳ shows its loras WITHOUT running (and they persist through refreshes
+    after a run too); reload the page → the list re-renders from the saved
+    workflow. Searching gibberish → "No results were returned by
     CivitAI's public API…" with a link to the same search on civitai.com.
