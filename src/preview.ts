@@ -4,13 +4,18 @@
 // payload the node emits in its ui message.
 import { type ResourceEntry, parseStatusPayload } from "./statusList";
 
-export async function fetchPreview(text: string, signal: AbortSignal): Promise<ResourceEntry[]> {
+export async function fetchPreview(
+  text: string,
+  loraHashes: string[],
+  signal: AbortSignal,
+): Promise<ResourceEntry[]> {
   // "/api"-prefixed alias: works behind the Comfy frontend dev proxy and
   // API-only reverse proxies (same pattern as the /api/lm/* calls).
+  // lora_hashes seeds run-parity duplicate marking for loaded_loras.
   const response = await fetch("/api/clth/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, lora_hashes: loraHashes }),
     signal,
   });
   if (!response.ok) {

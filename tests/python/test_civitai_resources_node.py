@@ -650,14 +650,32 @@ def test_parse_rejects_oversized_ids_softly() -> None:
 
 def test_parse_preview_body_validation() -> None:
     ok = json.dumps({"text": "CD64AF8696"}).encode("utf-8")
-    assert cnode._parse_preview_body(ok) == "CD64AF8696"
+    assert cnode._parse_preview_body(ok) == ("CD64AF8696", [])
+    with_hashes = json.dumps({"text": "x", "lora_hashes": ["D6A3AC6F8A"]}).encode("utf-8")
+    assert cnode._parse_preview_body(with_hashes) == ("x", ["D6A3AC6F8A"])
     assert cnode._parse_preview_body(b"not json") is None
     assert cnode._parse_preview_body(b'["text"]') is None
     assert cnode._parse_preview_body(b'{"text": 5}') is None
+    assert cnode._parse_preview_body(b'{"text": "x", "lora_hashes": "D6"}') is None
+    assert cnode._parse_preview_body(b'{"text": "x", "lora_hashes": [5]}') is None
+    long_hash = json.dumps({"text": "x", "lora_hashes": ["a" * 65]}).encode("utf-8")
+    assert cnode._parse_preview_body(long_hash) is None
     assert cnode._parse_preview_body(b"\xff\xfe") is None
     too_many_lines = json.dumps({"text": "\n" * (cnode.PREVIEW_MAX_LINES + 1)}).encode("utf-8")
     assert cnode._parse_preview_body(too_many_lines) is None
     assert cnode._parse_preview_body(b" " * (cnode.PREVIEW_MAX_BYTES + 1)) is None
+
+
+def test_preview_seeded_lora_hashes_mark_duplicates(tmp_path: Path) -> None:
+    fetch = _fake_fetch({"/api/v1/model-versions/3114726": VERSION_3114726})
+    out = cnode.preview_resources_json(
+        "https://civitai.com/models/2767064?modelVersionId=3114726",
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=fetch,
+        lora_hashes=["cd64af8696"],  # case-insensitive
+    )
+    (entry,) = json.loads(out)
+    assert entry["status"] == "duplicate"
 
 
 def test_execute_ui_echoes_textbox_input(monkeypatch) -> None:

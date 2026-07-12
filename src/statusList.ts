@@ -19,8 +19,6 @@ export interface StatusListOptions {
   onImageLoad?: () => void;
   /** Remove the row's raw line from the textbox — only rows with a source get a ✕. */
   onRemove?: (entry: ResourceEntry) => void;
-  /** Re-parse the textbox without queueing — renders a ⟳ toolbar when given. */
-  onRefresh?: () => void;
   /** Muted footer line, e.g. marking a preview render. */
   note?: string;
 }
@@ -94,12 +92,6 @@ const STATUS_STYLES = `
   color:var(--descrip-text,#999);font-size:12px;line-height:1;padding:4px 6px;
 }
 .clth-x:hover{color:var(--clth-err);background:color-mix(in srgb,var(--clth-err) 12%,transparent)}
-.clth-tools{display:flex;justify-content:flex-end}
-.clth-refresh{
-  background:none;border:0;cursor:pointer;border-radius:4px;
-  color:var(--descrip-text,#999);font-size:12px;line-height:1;padding:2px 6px;
-}
-.clth-refresh:hover{color:var(--p-primary-color,#7aa2f7)}
 .clth-note{
   color:var(--descrip-text,#999);font-size:10px;text-align:center;
   padding:3px 0 0;font-style:italic;
@@ -266,18 +258,6 @@ export function buildStatusList(
   injectStatusStyles();
   const root = document.createElement("div");
   root.className = "civitai-status-list";
-  if (options.onRefresh !== undefined) {
-    const tools = document.createElement("div");
-    tools.className = "clth-tools";
-    const refresh = document.createElement("button");
-    refresh.className = "clth-refresh";
-    refresh.textContent = "⟳";
-    refresh.title = "Re-parse civitai_resources without queueing";
-    refresh.setAttribute("aria-label", "Refresh resource preview");
-    refresh.addEventListener("click", () => options.onRefresh?.());
-    tools.appendChild(refresh);
-    root.appendChild(tools);
-  }
   if (entries.length === 0) {
     const empty = document.createElement("div");
     empty.className = "clth-empty";

@@ -6,6 +6,7 @@ import { fetchPreview } from "./preview";
 import {
   buildStatusList,
   parseStatusPayload,
+  type ResourceEntry,
   type StatusListOptions,
 } from "./statusList";
 
@@ -70,6 +71,9 @@ const pickerClosers = new WeakMap<StatusNodeLike, () => void>();
 const previewSeqs = new WeakMap<StatusNodeLike, number>();
 const previewControllers = new WeakMap<StatusNodeLike, AbortController>();
 const configureTimers = new WeakMap<StatusNodeLike, ReturnType<typeof setTimeout>>();
+// loaded_loras rows from the node's last run — previews can't know that input
+// (it only exists at execution time), so keep showing what the run reported.
+const lastLoraEntries = new WeakMap<StatusNodeLike, ResourceEntry[]>();
 
 function resourceTextWidget(node: StatusNodeLike): TextWidgetLike | undefined {
   return node.widgets?.find((widget) => widget.name === "civitai_resources");
@@ -86,7 +90,6 @@ function setResourceText(node: StatusNodeLike, value: string): void {
 function statusOptionsFor(node: StatusNodeLike): StatusListOptions {
   return {
     onImageLoad: () => node.setDirtyCanvas?.(true, true),
-    onRefresh: () => void refreshPreview(node),
     onRemove: (entry) => {
       const widget = resourceTextWidget(node);
       if (widget === undefined || typeof entry.source !== "string") return;
@@ -109,18 +112,29 @@ async function refreshPreview(node: StatusNodeLike): Promise<void> {
   const controller = new AbortController();
   previewControllers.set(node, controller);
   const text = String(widget.value ?? "");
+  const loraEntries = lastLoraEntries.get(node) ?? [];
+  const loraHashes = loraEntries
+    .map((entry) => (typeof entry.hash === "string" ? entry.hash : ""))
+    .filter((hash) => hash.length > 0);
   if (text.trim().length === 0) {
-    host.replaceChildren(buildStatusList([], statusOptionsFor(node)));
+    host.replaceChildren(
+      buildStatusList(loraEntries, {
+        ...statusOptionsFor(node),
+        ...(loraEntries.length > 0
+          ? { note: "queue a prompt to see final resource list" }
+          : {}),
+      }),
+    );
     syncNodeSize(node);
     return;
   }
   try {
-    const entries = await fetchPreview(text, controller.signal);
+    const entries = await fetchPreview(text, loraHashes, controller.signal);
     if (previewSeqs.get(node) !== seq) return;
     host.replaceChildren(
-      buildStatusList(entries, {
+      buildStatusList([...loraEntries, ...entries], {
         ...statusOptionsFor(node),
-        note: "preview — queue a prompt to finalize credits",
+        note: "queue a prompt to see final resource list",
       }),
     );
     syncNodeSize(node);
@@ -184,6 +198,23 @@ function createPickerButton(node: StatusNodeLike): void {
   }
 }
 
+function createRefreshButton(node: StatusNodeLike): void {
+  if (typeof node.addWidget !== "function") {
+    return;
+  }
+  // Lives outside the scrolling list so it never needs scrolling to reach.
+  const button = node.addWidget(
+    "button",
+    "⟳ Refresh resources",
+    "",
+    () => void refreshPreview(node),
+    { serialize: false },
+  );
+  if (button !== undefined) {
+    button.serialize = false;
+  }
+}
+
 function statusHostFor(node: StatusNodeLike): HTMLDivElement | null {
   const host = statusHosts.get(node);
   if (host !== undefined && node.widgets?.some((widget) => widget.name === WIDGET_NAME)) {
@@ -216,6 +247,7 @@ app.registerExtension({
     proto.onNodeCreated = function (this: StatusNodeLike) {
       originalCreated?.call(this);
       createPickerButton(this);
+      createRefreshButton(this);
       createStatusHost(this);
       syncNodeSize(this);
     };
@@ -253,6 +285,14 @@ app.registerExtension({
       if (host === null) {
         return;
       }
+      const entries = parseStatusPayload(payload);
+      // Remember the run's loaded_loras rows — previews merge them back in
+      // (that input only exists at execution time). Even a stale-textbox run
+      // still reported the current lora chain.
+      lastLoraEntries.set(
+        this,
+        entries.filter((entry) => entry.kind === "lora"),
+      );
       // A run is only authoritative for the textbox it resolved — if the user
       // edited while it was queued, preview the current text instead.
       const executedInput = message.civitai_resources_input?.[0];
@@ -264,7 +304,7 @@ app.registerExtension({
       // Executed payload wins over any in-flight preview of the same text.
       previewSeqs.set(this, (previewSeqs.get(this) ?? 0) + 1);
       previewControllers.get(this)?.abort();
-      host.replaceChildren(buildStatusList(parseStatusPayload(payload), statusOptionsFor(this)));
+      host.replaceChildren(buildStatusList(entries, statusOptionsFor(this)));
       syncNodeSize(this);
     };
   },

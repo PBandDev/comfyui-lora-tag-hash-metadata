@@ -109,25 +109,15 @@ describe("buildStatusList", () => {
     expect(buildStatusList(entries).querySelector(".clth-x")).toBeNull();
   });
 
-  it("renders a refresh button when onRefresh is given, even for the empty state", () => {
-    const onRefresh = vi.fn();
-    const el = buildStatusList([], { onRefresh });
-    const button = el.querySelector<HTMLButtonElement>(".clth-refresh");
-    expect(button).not.toBeNull();
-    button?.click();
-    expect(onRefresh).toHaveBeenCalledOnce();
-    expect(buildStatusList(entries).querySelector(".clth-refresh")).toBeNull();
-  });
-
   it("renders a note footer when given", () => {
-    const el = buildStatusList(entries, { note: "preview — queue a prompt to finalize" });
-    expect(el.querySelector(".clth-note")?.textContent).toContain("preview");
+    const el = buildStatusList(entries, { note: "queue a prompt to see final resource list" });
+    expect(el.querySelector(".clth-note")?.textContent).toContain("queue a prompt");
     expect(buildStatusList(entries).querySelector(".clth-note")).toBeNull();
   });
 
   it("keeps the note on empty renders (comment-only preview)", () => {
-    const el = buildStatusList([], { note: "preview — queue a prompt to finalize" });
-    expect(el.querySelector(".clth-note")?.textContent).toContain("preview");
+    const el = buildStatusList([], { note: "queue a prompt to see final resource list" });
+    expect(el.querySelector(".clth-note")?.textContent).toContain("queue a prompt");
     expect(el.querySelector(".clth-empty")).not.toBeNull();
   });
 });

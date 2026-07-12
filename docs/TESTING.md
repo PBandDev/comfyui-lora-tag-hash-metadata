@@ -93,7 +93,9 @@ pnpm e2e:serve     # foreground; Ctrl+C to stop
     the same card now says Remove; the Local tab lists your loras when LoRA
     Manager is installed.
 12. **Live preview**: after Apply the status list fills WITHOUT queueing
-    (rows marked "preview"); each row's ✕ deletes its line from the textbox;
-    ⟳ re-parses hand-typed lines; reload the page → the list re-renders from
-    the saved workflow. Searching gibberish → "No results were returned by
+    (note: "queue a prompt to see final resource list"); each row's ✕ deletes
+    its line from the textbox; ⟳ Refresh resources (under ＋ Add Resource)
+    re-parses hand-typed lines; after a run, `loaded_loras` rows stay in the
+    list through refreshes; reload the page → the list re-renders from the
+    saved workflow. Searching gibberish → "No results were returned by
     CivitAI's public API…" with a link to the same search on civitai.com.

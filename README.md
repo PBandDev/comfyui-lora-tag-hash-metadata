@@ -81,11 +81,12 @@ have to hand-copy URLs:
   Pasting such a model's version-pinned URL into the textbox still credits it.
 
 The in-node status list updates **live**: picker applies, the per-row **✕**
-(removes that line from the textbox), and the **⟳** button all re-parse
-`civitai_resources` through the node's own resolver + cache — no queueing
-needed. Rows are marked *preview* until a real run finalizes them (a run also
-dedups against `loaded_loras`). Loading a saved workflow re-renders the list
-the same way.
+(removes that line from the textbox), and the **⟳ Refresh resources** button
+(under ＋ Add Resource) all re-parse `civitai_resources` through the node's
+own resolver + cache — no queueing needed. `loaded_loras` rows from the last
+run stay in the list and seed duplicate detection. Preview renders carry a
+"queue a prompt to see final resource list" note. Loading a saved workflow
+re-renders the list the same way.
 
 Inputs:
 

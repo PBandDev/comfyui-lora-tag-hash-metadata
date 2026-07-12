@@ -415,6 +415,7 @@ def build_resource_report(
     lora_resolver=None,
     cache: ResolveCache | None = None,
     fetch=None,
+    seed_hashes: set[str] | None = None,
 ) -> ResourceReport:
     resolver = lora_resolver or resolve_lora_path
     from_v1 = build_additional_hashes(loaded_loras or "", resolver)
@@ -430,6 +431,9 @@ def build_resource_report(
     seen_hashes = {
         str(entry["hash"]).upper() for entry in entries if entry.get("hash")
     }
+    # Preview callers seed the lora hashes from the last run so textbox lines
+    # that duplicate a loaded lora are marked the same way a run would.
+    seen_hashes.update(h.upper() for h in (seed_hashes or set()))
     hash_parts = [from_v1.additional_hashes] if from_v1.additional_hashes else []
     resolved_names = [from_v1.resolved_loras] if from_v1.resolved_loras else []
     missing_parts = [from_v1.missing_loras] if from_v1.missing_loras else []
@@ -502,10 +506,18 @@ def preview_resources_json(
     civitai_resources: str,
     cache: ResolveCache | None = None,
     fetch=None,
+    lora_hashes: list[str] | None = None,
 ) -> str:
     """Entries payload for the frontend live preview — same pipeline as a run,
-    minus loaded_loras (only known at execution time)."""
-    return build_resource_report("", civitai_resources, cache=cache, fetch=fetch).resources_json
+    minus loaded_loras (only known at execution time). The frontend passes the
+    last run's lora hashes so duplicate marking matches run behavior."""
+    return build_resource_report(
+        "",
+        civitai_resources,
+        cache=cache,
+        fetch=fetch,
+        seed_hashes=set(lora_hashes or []),
+    ).resources_json
 
 
 # The preview endpoint is local-only but every parseable line can fan out into
@@ -515,8 +527,8 @@ PREVIEW_MAX_LINES = 200
 PREVIEW_MAX_PENDING = 4
 
 
-def _parse_preview_body(raw: bytes) -> str | None:
-    """Validated text from a /clth/preview body, or None to reject (400)."""
+def _parse_preview_body(raw: bytes) -> tuple[str, list[str]] | None:
+    """Validated (text, lora_hashes) from a /clth/preview body, or None (400)."""
     if len(raw) > PREVIEW_MAX_BYTES:
         return None
     try:
@@ -530,7 +542,14 @@ def _parse_preview_body(raw: bytes) -> str | None:
         return None
     if len(text.splitlines()) > PREVIEW_MAX_LINES:
         return None
-    return text
+    hashes = data.get("lora_hashes", [])
+    if (
+        not isinstance(hashes, list)
+        or len(hashes) > PREVIEW_MAX_LINES
+        or any(not isinstance(h, str) or len(h) > 64 for h in hashes)
+    ):
+        return None
+    return text, hashes
 
 
 class CivitaiResourcesToHashMetadata(io.ComfyNode):
@@ -601,15 +620,18 @@ def _register_preview_route() -> None:
         nonlocal pending
         if request.content_length is not None and request.content_length > PREVIEW_MAX_BYTES:
             return web.Response(status=413, text="preview body too large")
-        text = _parse_preview_body(await request.read())
-        if text is None:
+        parsed = _parse_preview_body(await request.read())
+        if parsed is None:
             return web.Response(status=400, text="invalid preview request")
+        text, lora_hashes = parsed
         if pending >= PREVIEW_MAX_PENDING:
             return web.Response(status=429, text="preview busy")
         pending += 1
         try:
             loop = asyncio.get_running_loop()
-            payload = await loop.run_in_executor(executor, preview_resources_json, text)
+            payload = await loop.run_in_executor(
+                executor, lambda: preview_resources_json(text, lora_hashes=lora_hashes)
+            )
         finally:
             pending -= 1
         return web.Response(text=payload, content_type="application/json")
