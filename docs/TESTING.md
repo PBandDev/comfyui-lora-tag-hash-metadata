@@ -96,7 +96,8 @@ pnpm e2e:serve     # foreground; Ctrl+C to stop
     (note: "queue a prompt to see final resource list"); each row's ✕ deletes
     its line from the textbox; ⟳ Refresh resources (under ＋ Add Resource)
     re-parses hand-typed lines; with an LM loader linked to `loaded_loras`,
-    ⟳ shows its loras WITHOUT running (and they persist through refreshes
-    after a run too); reload the page → the list re-renders from the saved
+    ⟳ shows its loras WITHOUT running — only the ones toggled ON in the
+    loras panel, matching what a run loads (and they persist through
+    refreshes after a run too); reload the page → the list re-renders from the saved
     workflow. Searching gibberish → "No results were returned by
     CivitAI's public API…" with a link to the same search on civitai.com.

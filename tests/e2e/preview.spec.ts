@@ -158,9 +158,19 @@ test("refresh pulls loaded_loras from a linked LM loader before any run", async 
     const loader = win.LiteGraph.createNode("Lora Loader (LoraManager)");
     if (loader === null) return "no LM loader node";
     graph.add(loader);
+    // Mirror real LM state with one lora toggled OFF: the synced text widget
+    // keeps the disabled tag, only the loras panel knows it's inactive.
     const text = loader.widgets?.find((w) => w.name === "text");
     if (text === undefined) return "no text widget";
-    text.value = "<lora:fisheye_slider_v10:1>";
+    text.value = "<lora:fisheye_slider_v10:1> <lora:age_slider_v20:1>";
+    const panel = loader.widgets?.find((w) => w.name === "loras");
+    if (panel === undefined) return "no loras panel widget";
+    // The live widget value is a plain array (the {__value__} wrapper only
+    // exists in serialized prompts); its setter rejects anything else.
+    panel.value = [
+      { name: "fisheye_slider_v10", strength: 1, active: true },
+      { name: "age_slider_v20", strength: 1, active: false },
+    ];
     const outSlot = loader.outputs?.findIndex((o) => o.name === "loaded_loras") ?? -1;
     const inSlot = node.inputs?.findIndex((i) => i.name === "loaded_loras") ?? -1;
     if (outSlot < 0 || inSlot < 0) return `slots ${outSlot}/${inSlot}`;
@@ -169,11 +179,14 @@ test("refresh pulls loaded_loras from a linked LM loader before any run", async 
   });
   expect(linked).toBe("ok");
 
-  // No run has happened — refresh alone must surface the lora row.
+  // No run has happened — refresh alone must surface the active lora row and
+  // exclude the disabled one, matching what a run would load.
   await clickRefresh(page);
   await expect(page.locator(".clth-row").first()).toContainText(/fisheye/i, {
     timeout: 30_000,
   });
+  await expect(page.locator(".clth-row")).toHaveCount(1);
+  await expect(page.locator(".clth-row", { hasText: "age_slider" })).toHaveCount(0);
 });
 
 test("loading a saved workflow re-renders the status list", async ({ page }) => {
