@@ -222,6 +222,9 @@ describe("openResourcePicker", () => {
             { status: 200 },
           );
         }
+        if (url.includes("/api/lm/checkpoints/list") || url.includes("/api/lm/embeddings/list")) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
         return new Response(JSON.stringify(SEARCH_PAYLOAD), { status: 200 });
       }),
     );
@@ -236,6 +239,110 @@ describe("openResourcePicker", () => {
     row?.querySelector<HTMLButtonElement>(".clth-pk-add")?.click();
     document.querySelector<HTMLButtonElement>(".clth-pk-apply")?.click();
     expect(text).toBe("https://civitai.com/models/2767064?modelVersionId=3114726");
+  });
+
+  it("local tab lists all LM kinds, filters via chips, weights only weighted kinds", async () => {
+    const localItem = (name: string, sha: string) => ({
+      model_name: name,
+      file_name: name,
+      folder: "",
+      sha256: sha,
+      preview_url: null,
+      civitai: null,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/lm/health-check")) return new Response("{}", { status: 200 });
+        if (url.includes("/api/lm/loras/list")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                localItem(
+                  "a_lora",
+                  "1111111111000000000000000000000000000000000000000000000000000000",
+                ),
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/api/lm/checkpoints/list")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                // Letter-bearing sha so the AutoV2 uppercase path is actually
+                // asserted (digits are casing-blind).
+                localItem(
+                  "a_ckpt",
+                  "abcdef1234000000000000000000000000000000000000000000000000000000",
+                ),
+                // LM hashes checkpoints lazily — a fresh unmatched one has an
+                // empty sha256 and must degrade to a disabled "no hash" row.
+                localItem("pending_ckpt", ""),
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/api/lm/embeddings/list")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                localItem(
+                  "an_embed",
+                  "3333333333000000000000000000000000000000000000000000000000000000",
+                ),
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify(SEARCH_PAYLOAD), { status: 200 });
+      }),
+    );
+    open();
+    await flush();
+    document.querySelector<HTMLButtonElement>(".clth-pk-tab-local")?.click();
+    await flush();
+
+    const cards = document.querySelectorAll<HTMLElement>(".clth-pk-card");
+    expect(cards).toHaveLength(4);
+    expect(cards[0].textContent).toContain("a_lora");
+    expect(cards[1].textContent).toContain("a_ckpt");
+    expect(cards[2].textContent).toContain("pending_ckpt");
+    expect(cards[3].textContent).toContain("an_embed");
+    // weights: lora yes, checkpoint no, embedding yes
+    expect(cards[0].querySelector(".clth-pk-weight")).not.toBeNull();
+    expect(cards[1].querySelector(".clth-pk-weight")).toBeNull();
+    expect(cards[3].querySelector(".clth-pk-weight")).not.toBeNull();
+    // hashless (LM lazy-hash) checkpoint: disabled button, remediation hint
+    const pendingButton = cards[2].querySelector<HTMLButtonElement>(".clth-pk-add");
+    expect(pendingButton?.disabled).toBe(true);
+    expect(pendingButton?.textContent).toBe("no hash");
+    expect(pendingButton?.title).toContain("LoRA Manager");
+
+    // kind chips replace the civitai type chips on this tab
+    const chipLabels = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".clth-pk-chip"),
+      (chip) => chip.textContent,
+    );
+    expect(chipLabels).toEqual(["All", "LoRAs", "Checkpoints", "Embeddings"]);
+
+    const checkpointChip = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".clth-pk-chip"),
+    ).find((chip) => chip.textContent === "Checkpoints");
+    checkpointChip?.click();
+    await flush();
+    const filtered = document.querySelectorAll<HTMLElement>(".clth-pk-card");
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0].textContent).toContain("a_ckpt");
+
+    // unmatched checkpoint stages its UPPERCASED AutoV2 hash line
+    filtered[0].querySelector<HTMLButtonElement>(".clth-pk-add")?.click();
+    document.querySelector<HTMLButtonElement>(".clth-pk-apply")?.click();
+    expect(text).toBe("ABCDEF1234");
   });
 
   it("can reopen after an internal close and applies mixed add + removal", async () => {

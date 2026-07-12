@@ -122,6 +122,48 @@ test("a just-added version shows Remove on reopen and apply deletes it", async (
   expect(await textboxValue(page)).toBe("");
 });
 
+test("local tab lists checkpoints and embeddings behind kind chips", async ({ page }) => {
+  await openPickerOnFreshNode(page);
+
+  const localTab = page.locator(".clth-pk-tab-local");
+  await expect(localTab).toBeVisible({ timeout: 15_000 });
+  await localTab.click();
+
+  // The civitai type chips swap for LM kind chips on this tab.
+  await expect(page.locator(".clth-pk-chip")).toHaveText([
+    "All",
+    "LoRAs",
+    "Checkpoints",
+    "Embeddings",
+  ]);
+
+  // Synthetic sha-locked checkpoint fixture (setup-e2e-packs.mjs pre-seeds
+  // its sidecar hash — LM alone would leave checkpoints hash_status=pending).
+  await page.fill(".clth-pk-search", "clth_ckpt_fixture");
+  const ckptRow = page.locator(".clth-pk-card", { hasText: "clth_ckpt_fixture" }).first();
+  await expect(ckptRow).toBeVisible({ timeout: 30_000 });
+  await expect(ckptRow.locator(".clth-pk-weight")).toHaveCount(0); // checkpoints take no weight
+  await ckptRow.locator(".clth-pk-add:not([disabled])").click();
+  await expect(page.locator(".clth-pk-count")).toHaveText("1 staged");
+
+  // Kind chip narrows to embeddings only.
+  await page.locator(".clth-pk-chip", { hasText: "Embeddings" }).click();
+  await page.fill(".clth-pk-search", "clth_embed_fixture");
+  const embedRow = page.locator(".clth-pk-card", { hasText: "clth_embed_fixture" }).first();
+  await expect(embedRow).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".clth-pk-card", { hasText: "clth_ckpt_fixture" })).toHaveCount(0);
+  await expect(embedRow.locator(".clth-pk-weight")).toHaveCount(1); // embeddings do
+  await embedRow.locator(".clth-pk-add:not([disabled])").click();
+  await expect(page.locator(".clth-pk-count")).toHaveText("2 staged");
+
+  await page.locator(".clth-pk-apply").click();
+  const value = await textboxValue(page);
+  // Unmatched local models insert their AutoV2 — deterministic for the
+  // synthetic fixtures.
+  expect(value).toContain("56CF07076F");
+  expect(value).toContain("7F7241EE73");
+});
+
 test("local tab lists LM loras and inserts a line", async ({ page }) => {
   await openPickerOnFreshNode(page);
 

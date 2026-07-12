@@ -11,7 +11,13 @@ import {
   searchModels,
   typeAcceptsWeight,
 } from "./civitaiSearch";
-import { type LocalLora, lmAvailable, searchLocalLoras } from "./lmLocal";
+import {
+  LOCAL_KINDS,
+  type LocalKind,
+  type LocalModel,
+  lmAvailable,
+  searchLocalModels,
+} from "./lmLocal";
 import {
   appendLines,
   identitiesIn,
@@ -32,6 +38,25 @@ type StagedOp =
 
 const STYLE_ID = "clth-picker-styles-v1";
 const DEBOUNCE_MS = 300;
+
+const KIND_CHIP_LABEL: Record<LocalKind, string> = {
+  loras: "LoRAs",
+  checkpoints: "Checkpoints",
+  embeddings: "Embeddings",
+};
+const KIND_META_LABEL: Record<LocalKind, string> = {
+  loras: "lora",
+  checkpoints: "checkpoint",
+  embeddings: "embedding",
+};
+const KIND_GLYPH: Record<LocalKind, string> = {
+  loras: "L",
+  checkpoints: "C",
+  embeddings: "E",
+};
+// Mirrors typeAcceptsWeight for civitai results: strengths apply to loras and
+// embeddings (TextualInversion), never to checkpoints.
+const WEIGHTED_KINDS: ReadonlySet<LocalKind> = new Set(["loras", "embeddings"]);
 
 const PICKER_STYLES = `
 .clth-pk-overlay{
@@ -213,6 +238,7 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
   let tab: "civitai" | "local" = "civitai";
   let sort: SearchSort = SEARCH_SORTS[0];
   let typeFilter: SearchType | null = null;
+  let localKind: LocalKind | null = null;
   let cursor: string | null = null;
   let cards: ModelCard[] = [];
   let controller: AbortController | null = null;
@@ -387,20 +413,23 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     return card;
   }
 
-  function localCard(lora: LocalLora): HTMLDivElement {
+  function localCard(model: LocalModel): HTMLDivElement {
     const card = el("div", "clth-pk-card");
-    card.appendChild(thumbEl(lora.previewUrl, "L"));
+    card.appendChild(thumbEl(model.previewUrl, KIND_GLYPH[model.kind]));
     const info = el("div", "clth-pk-info");
     const nameDiv = el("div", "clth-pk-name");
     info.appendChild(nameDiv);
     const meta = el("div", "clth-pk-meta");
-    meta.appendChild(el("span", "", lora.folder.length > 0 ? lora.folder : lora.fileName));
-    const autov2 = lora.sha256 !== null ? lora.sha256.slice(0, 10).toUpperCase() : null;
+    meta.appendChild(el("span", "", KIND_META_LABEL[model.kind]));
+    meta.appendChild(el("span", "", model.folder.length > 0 ? model.folder : model.fileName));
+    const autov2 = model.sha256 !== null ? model.sha256.slice(0, 10).toUpperCase() : null;
     meta.appendChild(
       el(
         "span",
         "",
-        lora.versionId !== null ? `civitai #${lora.modelId ?? "?"}` : `hash ${autov2 ?? "unknown"}`,
+        model.versionId !== null
+          ? `civitai #${model.modelId ?? "?"}`
+          : `hash ${autov2 ?? "unknown"}`,
       ),
     );
     const inNodeChip = el("span", "clth-pk-innode", "in node");
@@ -408,16 +437,19 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     info.appendChild(meta);
 
     const ctl = el("div", "clth-pk-ctl");
-    const wtLabel = el("label", "clth-pk-wt");
-    wtLabel.appendChild(el("span", "clth-pk-wt-label", "wt"));
-    const weight = document.createElement("input");
-    weight.className = "clth-pk-weight";
-    weight.placeholder = "1.0";
-    weight.inputMode = "decimal";
-    weight.title = "LoRA weight — blank for none";
-    weight.setAttribute("aria-label", "Weight");
-    wtLabel.appendChild(weight);
-    ctl.appendChild(wtLabel);
+    let weight: HTMLInputElement | null = null;
+    if (WEIGHTED_KINDS.has(model.kind)) {
+      const wtLabel = el("label", "clth-pk-wt");
+      wtLabel.appendChild(el("span", "clth-pk-wt-label", "wt"));
+      weight = document.createElement("input");
+      weight.className = "clth-pk-weight";
+      weight.placeholder = "1.0";
+      weight.inputMode = "decimal";
+      weight.title = "Weight — blank for none";
+      weight.setAttribute("aria-label", "Weight");
+      wtLabel.appendChild(weight);
+      ctl.appendChild(wtLabel);
+    }
     const button = el("button", "clth-pk-add", "Add");
     ctl.appendChild(button);
     info.appendChild(ctl);
@@ -427,26 +459,26 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     // inserted): a hash match stays a hash op even when LM also knows the
     // version id, so removals always target the line that really exists.
     const linkIds =
-      lora.versionId !== null && lora.modelId !== null
-        ? { modelId: lora.modelId, versionId: lora.versionId }
+      model.versionId !== null && model.modelId !== null
+        ? { modelId: model.modelId, versionId: model.versionId }
         : null;
     if (linkIds !== null) {
       const nameLink = document.createElement("a");
-      nameLink.textContent = lora.displayName;
+      nameLink.textContent = model.displayName;
       nameLink.href = `https://civitai.com/models/${linkIds.modelId}?modelVersionId=${linkIds.versionId}`;
       nameLink.target = "_blank";
       nameLink.rel = "noopener";
       nameDiv.appendChild(nameLink);
     } else {
-      nameDiv.textContent = lora.displayName;
+      nameDiv.textContent = model.displayName;
     }
     const inNodeAsVersion =
-      lora.versionId !== null && identities.versionIds.has(lora.versionId);
+      model.versionId !== null && identities.versionIds.has(model.versionId);
     const inNodeAsHash =
       !inNodeAsVersion && autov2 !== null && identities.hashes.has(autov2);
     const inNode = inNodeAsVersion || inNodeAsHash;
     const key = inNodeAsVersion
-      ? `v:${lora.versionId}`
+      ? `v:${model.versionId}`
       : inNodeAsHash
         ? `h:${autov2}`
         : linkIds !== null
@@ -459,19 +491,24 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     if (key === null) {
       button.disabled = true;
       button.textContent = "no hash";
+      // Checkpoints are the common case here: LM hashes them lazily, so a
+      // fresh, unmatched checkpoint has neither a civitai id nor a sha256.
+      button.title =
+        "LoRA Manager hasn't hashed this file yet and it has no civitai match — " +
+        "hash or match it in LoRA Manager, then reopen this picker.";
       return card;
     }
     card.dataset.key = key;
     button.addEventListener("click", () => {
-      if (inNodeAsVersion && lora.versionId !== null) {
-        toggleStage(key, { op: "remove-version", versionId: lora.versionId });
+      if (inNodeAsVersion && model.versionId !== null) {
+        toggleStage(key, { op: "remove-version", versionId: model.versionId });
         return;
       }
       if (inNodeAsHash && autov2 !== null) {
         toggleStage(key, { op: "remove-hash", autov2 });
         return;
       }
-      const raw = weight.value.trim();
+      const raw = weight?.value.trim() ?? "";
       const parsed = raw.length > 0 ? Number(raw) : null;
       const finite = parsed !== null && Number.isFinite(parsed) ? parsed : null;
       const line =
@@ -486,26 +523,46 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     refreshButton(key, button);
     const stagedNow = staged.has(key);
     card.setAttribute("data-staged", String(stagedNow));
-    weight.disabled = stagedNow;
+    if (weight !== null) weight.disabled = stagedNow;
     return card;
   }
 
   function renderChips(): void {
     chips.replaceChildren();
-    if (tab !== "civitai") return;
+    if (tab === "civitai") {
+      const all = el("button", "clth-pk-chip", "All");
+      all.setAttribute("aria-pressed", String(typeFilter === null));
+      all.addEventListener("click", () => {
+        typeFilter = null;
+        renderChips();
+        void load(true);
+      });
+      chips.appendChild(all);
+      for (const value of SEARCH_TYPES) {
+        const chip = el("button", "clth-pk-chip", value);
+        chip.setAttribute("aria-pressed", String(typeFilter === value));
+        chip.addEventListener("click", () => {
+          typeFilter = value;
+          renderChips();
+          void load(true);
+        });
+        chips.appendChild(chip);
+      }
+      return;
+    }
     const all = el("button", "clth-pk-chip", "All");
-    all.setAttribute("aria-pressed", String(typeFilter === null));
+    all.setAttribute("aria-pressed", String(localKind === null));
     all.addEventListener("click", () => {
-      typeFilter = null;
+      localKind = null;
       renderChips();
       void load(true);
     });
     chips.appendChild(all);
-    for (const value of SEARCH_TYPES) {
-      const chip = el("button", "clth-pk-chip", value);
-      chip.setAttribute("aria-pressed", String(typeFilter === value));
+    for (const kind of LOCAL_KINDS) {
+      const chip = el("button", "clth-pk-chip", KIND_CHIP_LABEL[kind]);
+      chip.setAttribute("aria-pressed", String(localKind === kind));
       chip.addEventListener("click", () => {
-        typeFilter = value;
+        localKind = kind;
         renderChips();
         void load(true);
       });
@@ -584,20 +641,39 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
         }
         if (cards.length === 0) setCivitaiEmpty();
       } else {
-        const rows = await searchLocalLoras(search.value.trim(), controller.signal);
+        const kinds = localKind === null ? LOCAL_KINDS : [localKind];
+        const result = await searchLocalModels(kinds, search.value.trim(), controller.signal);
         if (seq !== loadSeq || closed) return;
         setStatus(null);
         body.replaceChildren();
         const note = el(
           "div",
           "clth-pk-note",
-          "Local files via LoRA Manager. Matched loras insert a civitai link; unmatched ones insert their hash.",
+          "Local loras, checkpoints & embeddings via LoRA Manager. Matched models insert a civitai link; unmatched ones insert their hash.",
         );
         body.appendChild(note);
+        if (result.failedKinds.length > 0) {
+          body.appendChild(
+            el(
+              "div",
+              "clth-pk-note",
+              `Unavailable from LoRA Manager: ${result.failedKinds.join(", ")}.`,
+            ),
+          );
+        }
+        if (result.truncatedKinds.length > 0) {
+          body.appendChild(
+            el(
+              "div",
+              "clth-pk-note",
+              `Showing the first page of ${result.truncatedKinds.join(", ")} — search to find the rest.`,
+            ),
+          );
+        }
         const target = el("div", "clth-pk-grid");
         body.appendChild(target);
-        for (const lora of rows) target.appendChild(localCard(lora));
-        if (rows.length === 0) setStatus("No local loras found.");
+        for (const model of result.rows) target.appendChild(localCard(model));
+        if (result.rows.length === 0) setStatus("No local models found.");
       }
     } catch (error) {
       // Same staleness guard as the success path — a superseded request's
@@ -614,7 +690,9 @@ export function openResourcePicker(ctx: PickerContext): (() => void) | null {
     tabCivitai.setAttribute("aria-selected", String(next === "civitai"));
     localTab?.setAttribute("aria-selected", String(next === "local"));
     search.placeholder =
-      next === "civitai" ? "Search civitai — models, workflows, encoders…" : "Filter local loras…";
+      next === "civitai" ? "Search civitai — models, workflows, encoders…" : "Filter local models…";
+    // Sort orders only the civitai feed; LM's lists come back in its own order.
+    sortSelect.style.display = next === "civitai" ? "" : "none";
     renderChips();
     void load(true);
   }

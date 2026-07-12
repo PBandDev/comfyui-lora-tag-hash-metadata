@@ -90,8 +90,10 @@ pnpm e2e:serve     # foreground; Ctrl+C to stop
     on 20+ lines.
 11. **Picker**: click ＋ Add Resource → browse feed appears → search "anima
     detailer" → Add → Apply → a pinned URL line lands in the textbox; reopen →
-    the same card now says Remove; the Local tab lists your loras when LoRA
-    Manager is installed.
+    the same card now says Remove; the Local tab lists your loras,
+    checkpoints, and embeddings when LoRA Manager is installed (All / LoRAs /
+    Checkpoints / Embeddings chips narrow by kind; checkpoints show no weight
+    box).
 12. **Live preview**: after Apply the status list fills WITHOUT queueing
     (note: "queue a prompt to see final resource list"); each row's ✕ deletes
     its line from the textbox; ⟳ Refresh resources (under ＋ Add Resource)
