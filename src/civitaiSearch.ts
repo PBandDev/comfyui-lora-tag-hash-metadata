@@ -136,10 +136,11 @@ function backoff(ms: number, signal: AbortSignal): Promise<void> {
 export async function searchModels(q: SearchQuery, signal: AbortSignal): Promise<SearchPage> {
   const url = buildSearchUrl(q);
   let response = await fetch(url, { signal });
-  if (response.status >= 500) {
-    // civitai intermittently answers 5xx; one short retry rides out most
-    // flaps (the python resolver retries the same way).
-    await backoff(750, signal);
+  // civitai intermittently answers 5xx in short windows; retry with growing
+  // backoff like the python resolver (3 attempts total).
+  for (const delay of [750, 1500]) {
+    if (response.status < 500) break;
+    await backoff(delay, signal);
     response = await fetch(url, { signal });
   }
   if (!response.ok) {

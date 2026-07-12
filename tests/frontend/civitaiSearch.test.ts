@@ -116,7 +116,7 @@ describe("searchModels", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it("retries once on 5xx after a short backoff", async () => {
+  it("retries up to twice on 5xx with growing backoff", async () => {
     vi.useFakeTimers();
     try {
       let calls = 0;
@@ -124,16 +124,31 @@ describe("searchModels", () => {
         "fetch",
         vi.fn(async () => {
           calls += 1;
-          return calls === 1
+          return calls <= 2
             ? new Response("", { status: 503 })
             : new Response(JSON.stringify(payload), { status: 200 });
         }),
       );
       const pending = searchModels({ query: "anima" }, new AbortController().signal);
-      await vi.advanceTimersByTimeAsync(800);
+      await vi.advanceTimersByTimeAsync(2300);
       const page = await pending;
-      expect(calls).toBe(2);
+      expect(calls).toBe(3);
       expect(page.items).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after three failed attempts", async () => {
+    vi.useFakeTimers();
+    try {
+      const spy = vi.fn(async () => new Response("", { status: 503 }));
+      vi.stubGlobal("fetch", spy);
+      const pending = searchModels({}, new AbortController().signal);
+      const expectation = expect(pending).rejects.toThrow("503");
+      await vi.advanceTimersByTimeAsync(2300);
+      await expectation;
+      expect(spy).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
