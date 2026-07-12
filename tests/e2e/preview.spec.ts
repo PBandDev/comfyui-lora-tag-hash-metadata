@@ -8,6 +8,9 @@ interface WidgetLike {
 
 interface NodeLike {
   widgets?: WidgetLike[];
+  inputs?: { name: string }[];
+  outputs?: { name: string }[];
+  connect?(slot: number, target: NodeLike, targetSlot: number): object | null;
 }
 
 interface PreviewWindow {
@@ -143,6 +146,34 @@ test("loaded_loras rows persist through refresh and preview renders", async ({ p
   await expect(page.locator(".clth-row")).toHaveCount(2, { timeout: 30_000 });
   await expect(page.locator(".clth-row").nth(0)).toContainText("fisheye_slider_v10");
   await expect(page.locator(".clth-row").nth(1)).toContainText("Anima Detailer");
+});
+
+test("refresh pulls loaded_loras from a linked LM loader before any run", async ({ page }) => {
+  await freshNodeWithText(page, "");
+  const linked = await page.evaluate(() => {
+    const win = window as object as PreviewWindow;
+    const node = win.__previewNode;
+    const graph = win.app?.graph;
+    if (node === undefined || graph === undefined) return "no node/graph";
+    const loader = win.LiteGraph.createNode("Lora Loader (LoraManager)");
+    if (loader === null) return "no LM loader node";
+    graph.add(loader);
+    const text = loader.widgets?.find((w) => w.name === "text");
+    if (text === undefined) return "no text widget";
+    text.value = "<lora:fisheye_slider_v10:1>";
+    const outSlot = loader.outputs?.findIndex((o) => o.name === "loaded_loras") ?? -1;
+    const inSlot = node.inputs?.findIndex((i) => i.name === "loaded_loras") ?? -1;
+    if (outSlot < 0 || inSlot < 0) return `slots ${outSlot}/${inSlot}`;
+    const link = loader.connect?.(outSlot, node, inSlot);
+    return link === null || link === undefined ? "connect failed" : "ok";
+  });
+  expect(linked).toBe("ok");
+
+  // No run has happened — refresh alone must surface the lora row.
+  await clickRefresh(page);
+  await expect(page.locator(".clth-row").first()).toContainText(/fisheye/i, {
+    timeout: 30_000,
+  });
 });
 
 test("loading a saved workflow re-renders the status list", async ({ page }) => {

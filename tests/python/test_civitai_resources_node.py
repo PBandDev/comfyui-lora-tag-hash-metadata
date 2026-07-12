@@ -650,20 +650,49 @@ def test_parse_rejects_oversized_ids_softly() -> None:
 
 def test_parse_preview_body_validation() -> None:
     ok = json.dumps({"text": "CD64AF8696"}).encode("utf-8")
-    assert cnode._parse_preview_body(ok) == ("CD64AF8696", [])
-    with_hashes = json.dumps({"text": "x", "lora_hashes": ["D6A3AC6F8A"]}).encode("utf-8")
-    assert cnode._parse_preview_body(with_hashes) == ("x", ["D6A3AC6F8A"])
+    assert cnode._parse_preview_body(ok) == ("CD64AF8696", [], "")
+    full = json.dumps(
+        {"text": "x", "lora_hashes": ["D6A3AC6F8A"], "loaded_loras": "<lora:foo:1>"}
+    ).encode("utf-8")
+    assert cnode._parse_preview_body(full) == ("x", ["D6A3AC6F8A"], "<lora:foo:1>")
     assert cnode._parse_preview_body(b"not json") is None
     assert cnode._parse_preview_body(b'["text"]') is None
     assert cnode._parse_preview_body(b'{"text": 5}') is None
     assert cnode._parse_preview_body(b'{"text": "x", "lora_hashes": "D6"}') is None
     assert cnode._parse_preview_body(b'{"text": "x", "lora_hashes": [5]}') is None
+    assert cnode._parse_preview_body(b'{"text": "x", "loaded_loras": 5}') is None
     long_hash = json.dumps({"text": "x", "lora_hashes": ["a" * 65]}).encode("utf-8")
     assert cnode._parse_preview_body(long_hash) is None
     assert cnode._parse_preview_body(b"\xff\xfe") is None
     too_many_lines = json.dumps({"text": "\n" * (cnode.PREVIEW_MAX_LINES + 1)}).encode("utf-8")
     assert cnode._parse_preview_body(too_many_lines) is None
     assert cnode._parse_preview_body(b" " * (cnode.PREVIEW_MAX_BYTES + 1)) is None
+
+
+def test_preview_with_loaded_loras_includes_lora_rows_and_dedups(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    foo.write_bytes(b"abc")
+    autov2 = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    hash_payload = {
+        "id": 77,
+        "modelId": 55,
+        "name": "v1",
+        "model": {"name": "Foo", "type": "LORA"},
+        "files": [{"id": 1, "hashes": {"AutoV2": autov2}}],
+    }
+    out = cnode.preview_resources_json(
+        autov2,  # textbox line duplicating the loaded lora
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=_fake_fetch({f"/api/v1/model-versions/by-hash/{autov2}": hash_payload}),
+        loaded_loras="<lora:foo:0.5>",
+        lora_resolver=lambda name: str(foo) if name == "foo" else None,
+    )
+    payload = json.loads(out)
+    kinds = [e["kind"] for e in payload]
+    assert kinds == ["lora", "hash"]
+    assert payload[0]["status"] == "resolved"
+    assert payload[0]["hash"] == autov2
+    assert payload[1]["status"] == "duplicate"  # run-parity dedup, lora wins
 
 
 def test_preview_seeded_lora_hashes_mark_duplicates(tmp_path: Path) -> None:

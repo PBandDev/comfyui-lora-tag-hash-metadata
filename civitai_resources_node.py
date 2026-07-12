@@ -507,13 +507,17 @@ def preview_resources_json(
     cache: ResolveCache | None = None,
     fetch=None,
     lora_hashes: list[str] | None = None,
+    loaded_loras: str = "",
+    lora_resolver=None,
 ) -> str:
-    """Entries payload for the frontend live preview — same pipeline as a run,
-    minus loaded_loras (only known at execution time). The frontend passes the
-    last run's lora hashes so duplicate marking matches run behavior."""
+    """Entries payload for the frontend live preview — same pipeline as a run.
+    The frontend extracts loaded_loras from the upstream link's widget state
+    when it can (LM loader); lora_hashes is the last-run fallback so duplicate
+    marking still matches run behavior when it can't."""
     return build_resource_report(
-        "",
+        loaded_loras,
         civitai_resources,
+        lora_resolver=lora_resolver,
         cache=cache,
         fetch=fetch,
         seed_hashes=set(lora_hashes or []),
@@ -527,8 +531,9 @@ PREVIEW_MAX_LINES = 200
 PREVIEW_MAX_PENDING = 4
 
 
-def _parse_preview_body(raw: bytes) -> tuple[str, list[str]] | None:
-    """Validated (text, lora_hashes) from a /clth/preview body, or None (400)."""
+def _parse_preview_body(raw: bytes) -> tuple[str, list[str], str] | None:
+    """Validated (text, lora_hashes, loaded_loras) from a /clth/preview body,
+    or None (400)."""
     if len(raw) > PREVIEW_MAX_BYTES:
         return None
     try:
@@ -549,7 +554,10 @@ def _parse_preview_body(raw: bytes) -> tuple[str, list[str]] | None:
         or any(not isinstance(h, str) or len(h) > 64 for h in hashes)
     ):
         return None
-    return text, hashes
+    loaded_loras = data.get("loaded_loras", "")
+    if not isinstance(loaded_loras, str) or len(loaded_loras.splitlines()) > PREVIEW_MAX_LINES:
+        return None
+    return text, hashes, loaded_loras
 
 
 class CivitaiResourcesToHashMetadata(io.ComfyNode):
@@ -623,14 +631,17 @@ def _register_preview_route() -> None:
         parsed = _parse_preview_body(await request.read())
         if parsed is None:
             return web.Response(status=400, text="invalid preview request")
-        text, lora_hashes = parsed
+        text, lora_hashes, loaded_loras = parsed
         if pending >= PREVIEW_MAX_PENDING:
             return web.Response(status=429, text="preview busy")
         pending += 1
         try:
             loop = asyncio.get_running_loop()
             payload = await loop.run_in_executor(
-                executor, lambda: preview_resources_json(text, lora_hashes=lora_hashes)
+                executor,
+                lambda: preview_resources_json(
+                    text, lora_hashes=lora_hashes, loaded_loras=loaded_loras
+                ),
             )
         finally:
             pending -= 1
