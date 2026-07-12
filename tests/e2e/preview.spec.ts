@@ -189,6 +189,49 @@ test("refresh pulls loaded_loras from a linked LM loader before any run", async 
   await expect(page.locator(".clth-row", { hasText: "age_slider" })).toHaveCount(0);
 });
 
+test("all-disabled panel previews empty even after a run stored lora rows", async ({ page }) => {
+  await freshNodeWithText(page, "");
+  const linked = await page.evaluate(() => {
+    const win = window as object as PreviewWindow;
+    const node = win.__previewNode as
+      | (NodeLike & { onExecuted?(m: object): void })
+      | undefined;
+    const graph = win.app?.graph;
+    if (node === undefined || graph === undefined) return "no node/graph";
+    // A previous run reported a lora row — the stale-snapshot door.
+    node.onExecuted?.({
+      civitai_resources_status: [
+        JSON.stringify([
+          { kind: "lora", status: "resolved", name: "fisheye_slider_v10", hash: "D6A3AC6F8A" },
+        ]),
+      ],
+      civitai_resources_input: [""],
+    });
+    const loader = win.LiteGraph.createNode("Lora Loader (LoraManager)");
+    if (loader === null) return "no LM loader node";
+    graph.add(loader);
+    const text = loader.widgets?.find((w) => w.name === "text");
+    if (text === undefined) return "no text widget";
+    text.value = "<lora:fisheye_slider_v10:1>";
+    const panel = loader.widgets?.find((w) => w.name === "loras");
+    if (panel === undefined) return "no loras panel widget";
+    panel.value = [{ name: "fisheye_slider_v10", strength: 1, active: false }];
+    const outSlot = loader.outputs?.findIndex((o) => o.name === "loaded_loras") ?? -1;
+    const inSlot = node.inputs?.findIndex((i) => i.name === "loaded_loras") ?? -1;
+    if (outSlot < 0 || inSlot < 0) return `slots ${outSlot}/${inSlot}`;
+    const link = loader.connect?.(outSlot, node, inSlot);
+    return link === null || link === undefined ? "connect failed" : "ok";
+  });
+  expect(linked).toBe("ok");
+  await expect(page.locator(".clth-row").first()).toContainText("fisheye_slider_v10");
+
+  // Panel says zero active loras — authoritative: neither the tag text nor
+  // the last run's rows may render.
+  await clickRefresh(page);
+  await expect(page.locator(".clth-empty")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".clth-row")).toHaveCount(0);
+});
+
 test("loading a saved workflow re-renders the status list", async ({ page }) => {
   await freshNodeWithText(page, PINNED_LINE);
   await clickRefresh(page);

@@ -116,13 +116,14 @@ async function refreshPreview(node: StatusNodeLike): Promise<void> {
   previewControllers.set(node, controller);
   const text = String(widget.value ?? "");
   // Live upstream widget state beats the last-run snapshot; the snapshot
-  // covers producers whose value we can't read without executing.
+  // only covers producers we can't read without executing (null). "" is an
+  // authoritative zero — an all-disabled panel must not resurrect old rows.
   const upstream = upstreamLoadedLoras(node);
-  const loraEntries = upstream.length > 0 ? [] : (lastLoraEntries.get(node) ?? []);
+  const loraEntries = upstream === null ? (lastLoraEntries.get(node) ?? []) : [];
   const loraHashes = loraEntries
     .map((entry) => (typeof entry.hash === "string" ? entry.hash : ""))
     .filter((hash) => hash.length > 0);
-  if (text.trim().length === 0 && upstream.length === 0) {
+  if (text.trim().length === 0 && (upstream === null || upstream.length === 0)) {
     host.replaceChildren(
       buildStatusList(loraEntries, {
         ...statusOptionsFor(node),
@@ -135,7 +136,7 @@ async function refreshPreview(node: StatusNodeLike): Promise<void> {
     return;
   }
   try {
-    const entries = await fetchPreview(text, loraHashes, upstream, controller.signal);
+    const entries = await fetchPreview(text, loraHashes, upstream ?? "", controller.signal);
     if (previewSeqs.get(node) !== seq) return;
     host.replaceChildren(
       buildStatusList([...loraEntries, ...entries], {

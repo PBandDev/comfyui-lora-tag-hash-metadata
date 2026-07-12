@@ -39,36 +39,44 @@ function entryStrength(entry: LmLoraEntry): number {
   return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : 1;
 }
 
-function lmLoraEntries(value: string | number | boolean | object | undefined): LmLoraEntry[] {
-  if (typeof value !== "object" || value === null) return [];
+// The live widget value is a plain array; the {__value__:[...]} wrapper only
+// exists in serialized prompts. Anything else isn't LM's panel — a widget
+// merely NAMED "loras" must not swallow the string fallback.
+function panelEntries(value: string | number | boolean | object | undefined): LmLoraEntry[] | null {
+  if (typeof value !== "object" || value === null) return null;
   const wrapped = (value as { __value__?: LmLoraEntry[] }).__value__;
   if (Array.isArray(wrapped)) return wrapped;
-  return Array.isArray(value) ? (value as LmLoraEntry[]) : [];
+  return Array.isArray(value) ? (value as LmLoraEntry[]) : null;
 }
 
 // LM's loras panel is the run-time authority: at execution the loader loads
-// only entries whose `active` toggle is on, while its synced tag-text widget
-// keeps disabled tags (so re-enabling is non-destructive). So when the
-// producer has a panel, synthesize from it — even when every entry is toggled
-// off, which must preview as no loras, not fall back to the stale text. The
+// only entries whose `active` toggle is on (missing flag = off, matching its
+// python's `lora.get("active", False)`), while its synced tag-text widget
+// keeps disabled tags so re-enabling is non-destructive. So when the producer
+// has a panel, synthesize from it — even when every entry is toggled off,
+// which must preview as "" (no loras), not fall back to the stale text. The
 // plain lora-tag string scan only covers producers without a panel.
-export function upstreamLoadedLoras(node: UpstreamHostLike): string {
+//
+// Returns null when the producer can't be read at all (no link, no panel, no
+// tag text) — the caller falls back to the last run's rows. "" is a REAL
+// answer: the panel says zero active loras.
+export function upstreamLoadedLoras(node: UpstreamHostLike): string | null {
   const linkId = node.inputs?.find((input) => input.name === "loaded_loras")?.link;
   const graph = node.graph;
-  if (linkId === null || linkId === undefined || graph?.getNodeById === undefined) return "";
+  if (linkId === null || linkId === undefined || graph?.getNodeById === undefined) return null;
   const links = graph.links;
   const link =
     links === undefined ? undefined : links instanceof Map ? links.get(linkId) : links[linkId];
-  if (link === undefined) return "";
+  if (link === undefined) return null;
   const widgets = graph.getNodeById(link.origin_id)?.widgets ?? [];
-  const panel = widgets.find(
-    (widget) => widget.name === "loras" && typeof widget.value === "object" && widget.value !== null,
-  );
-  if (panel !== undefined) {
-    return lmLoraEntries(panel.value)
+  for (const widget of widgets) {
+    if (widget.name !== "loras") continue;
+    const entries = panelEntries(widget.value);
+    if (entries === null) continue;
+    return entries
       .filter(
         (entry) =>
-          entry.active !== false && typeof entry.name === "string" && entry.name.length > 0,
+          entry.active === true && typeof entry.name === "string" && entry.name.length > 0,
       )
       .map((entry) => `<lora:${entry.name}:${entryStrength(entry)}>`)
       .join(" ");
@@ -78,5 +86,5 @@ export function upstreamLoadedLoras(node: UpstreamHostLike): string {
       return widget.value;
     }
   }
-  return "";
+  return null;
 }

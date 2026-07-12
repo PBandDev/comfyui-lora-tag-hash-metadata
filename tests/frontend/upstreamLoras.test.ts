@@ -17,15 +17,19 @@ const panel = (entries: object[]): UpstreamWidgetLike => ({
 });
 
 describe("upstreamLoadedLoras", () => {
-  it("returns empty without a link, graph, or resolvable origin", () => {
-    expect(upstreamLoadedLoras({})).toBe("");
-    expect(upstreamLoadedLoras({ inputs: [{ name: "loaded_loras", link: null }] })).toBe("");
+  it("returns null (unreadable) without a link, graph, or resolvable origin", () => {
+    expect(upstreamLoadedLoras({})).toBeNull();
+    expect(upstreamLoadedLoras({ inputs: [{ name: "loaded_loras", link: null }] })).toBeNull();
     expect(
       upstreamLoadedLoras({
         inputs: [{ name: "loaded_loras", link: 3 }],
         graph: { links: new Map(), getNodeById: () => null },
       }),
-    ).toBe("");
+    ).toBeNull();
+  });
+
+  it("returns null when the producer has no panel and no tag text", () => {
+    expect(upstreamLoadedLoras(host([{ name: "seed", value: 42 }]))).toBeNull();
   });
 
   it("synthesizes tags from the loras panel, defaulting strength to 1", () => {
@@ -68,7 +72,16 @@ describe("upstreamLoadedLoras", () => {
       { name: "text", value: "<lora:age_slider_v20:1>" },
       panel([{ name: "age_slider_v20", strength: 1, active: false }]),
     ]);
+    // "" (authoritative zero), NOT null — the caller must not fall back to
+    // last-run rows either.
     expect(upstreamLoadedLoras(node)).toBe("");
+  });
+
+  it("excludes entries missing the active flag (python: lora.get('active', False))", () => {
+    const node = host([
+      panel([{ name: "no_flag", strength: 1 }, { name: "on", strength: 1, active: true }]),
+    ]);
+    expect(upstreamLoadedLoras(node)).toBe("<lora:on:1>");
   });
 
   it("parses string strengths (LM's arrow controls store toFixed strings)", () => {
@@ -106,6 +119,14 @@ describe("upstreamLoadedLoras", () => {
 
   it("ignores a string-valued widget named loras (not a panel)", () => {
     const node = host([{ name: "loras", value: "<lora:fisheye_slider_v10:1>" }]);
+    expect(upstreamLoadedLoras(node)).toBe("<lora:fisheye_slider_v10:1>");
+  });
+
+  it("a non-array object named loras is not a panel — string fallback still wins", () => {
+    const node = host([
+      { name: "loras", value: { some: "config" } },
+      { name: "text", value: "<lora:fisheye_slider_v10:1>" },
+    ]);
     expect(upstreamLoadedLoras(node)).toBe("<lora:fisheye_slider_v10:1>");
   });
 

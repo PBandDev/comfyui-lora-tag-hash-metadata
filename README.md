@@ -149,7 +149,9 @@ Behavior:
 
 Inputs:
 
-- `loaded_loras`: multiline string containing one or more `<lora:name:weight>` tags
+- `loaded_loras`: multiline string containing one or more `<lora:name:weight>`
+  tags; LoRA Manager's dual-strength form `<lora:name:model:clip>` is accepted
+  too (the model strength is the credited weight)
 
 Outputs:
 
