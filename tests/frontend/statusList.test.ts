@@ -109,6 +109,24 @@ describe("buildStatusList", () => {
     expect(buildStatusList(entries).querySelector(".clth-x")).toBeNull();
   });
 
+  it("explains the status dot via tooltips", () => {
+    const el = buildStatusList([
+      entries[0], // resolved
+      { ...entries[0], unverified: true },
+      { ...entries[0], status: "duplicate" },
+      entries[1], // missing
+    ]);
+    const dots = el.querySelectorAll<HTMLElement>(".clth-dot");
+    expect(dots[0].title).toContain("will be credited");
+    expect(dots[1].title).toContain("unverified");
+    expect(dots[2].title).toContain("Duplicate");
+    expect(dots[3].title).toContain("NOT be credited");
+    // The 8px dot is a tiny hover target — the row carries the same tooltip.
+    const rows = el.querySelectorAll<HTMLElement>(".clth-row");
+    expect(rows[0].title).toBe(dots[0].title);
+    expect(dots[0].getAttribute("aria-label")).toBe(dots[0].title);
+  });
+
   it("renders a note footer when given", () => {
     const el = buildStatusList(entries, { note: "queue a prompt to see final resource list" });
     expect(el.querySelector(".clth-note")?.textContent).toContain("queue a prompt");

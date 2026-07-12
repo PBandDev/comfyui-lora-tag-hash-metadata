@@ -88,7 +88,8 @@ the preview reads the linked loader's widget state (LoRA Manager's loader,
 or any node exposing `<lora:…>` tag text), falling back to the last run's
 rows for producers it can't read. Preview renders carry a "queue a prompt to
 see final resource list" note. Loading a saved workflow re-renders the list
-the same way.
+the same way. Hover a row (or its status dot) for what the color means —
+resolved / unverified hash / duplicate / not credited.
 
 Inputs:
 

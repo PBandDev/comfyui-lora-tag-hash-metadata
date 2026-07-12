@@ -194,10 +194,27 @@ function subtitleText(entry: ResourceEntry): string {
   return parts.join("  ·  ");
 }
 
+// The dot/border colors carry no meaning on their own — spell it out.
+function statusTitle(entry: ResourceEntry): string {
+  if (entry.status === "missing") {
+    return "Not resolved — this line will NOT be credited in image metadata";
+  }
+  if (entry.status === "duplicate") {
+    return "Duplicate — the same file is already credited by another entry";
+  }
+  if (entry.unverified) {
+    return "Credited unverified — civitai lookup failed, the raw hash is kept as-is";
+  }
+  return "Resolved — will be credited in image metadata";
+}
+
 function buildRow(entry: ResourceEntry, options: StatusListOptions): HTMLDivElement {
   const row = document.createElement("div");
   row.className = "clth-row";
   row.dataset.status = entry.status;
+  // The 8px dot is a tiny hover target, so the row shares its tooltip; the
+  // subtitle keeps its own more specific title (source line / error).
+  row.title = statusTitle(entry);
 
   row.appendChild(buildThumb(entry, options));
 
@@ -230,6 +247,9 @@ function buildRow(entry: ResourceEntry, options: StatusListOptions): HTMLDivElem
 
   const dot = document.createElement("div");
   dot.className = "clth-dot";
+  dot.title = statusTitle(entry);
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", statusTitle(entry));
   row.appendChild(dot);
 
   // Only textbox-backed rows can be removed — v1 lora-tag rows have no source
