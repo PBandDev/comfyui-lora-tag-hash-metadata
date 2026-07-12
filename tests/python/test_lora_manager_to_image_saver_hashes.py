@@ -214,7 +214,16 @@ def test_parse_multiple_loras() -> None:
 
 
 def test_parse_ignores_malformed_loras() -> None:
-    assert parse_loaded_loras("<lora:foo:abc> <lora:bar:0.8:extra>") == []
+    assert parse_loaded_loras("<lora:foo:abc> <lora:bar:1:2:3>") == []
+
+
+def test_parse_dual_strength_credits_model_weight() -> None:
+    # LoRA Manager emits <lora:name:model:clip> when the strengths differ;
+    # the clip segment is ignored, the model strength is the credited weight.
+    assert parse_loaded_loras("<lora:foo:0.8:0.5> <lora:bar:0.7:junk>") == [
+        ("foo", 0.8),
+        ("bar", 0.7),
+    ]
 
 
 def test_parse_ignores_non_finite_weights() -> None:

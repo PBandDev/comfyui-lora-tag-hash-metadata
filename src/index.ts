@@ -9,6 +9,7 @@ import {
   type ResourceEntry,
   type StatusListOptions,
 } from "./statusList";
+import { upstreamLoadedLoras, type UpstreamGraphLike } from "./upstreamLoras";
 
 declare global {
   const app: ComfyApp;
@@ -36,24 +37,11 @@ interface TextWidgetLike {
   callback?: (value: string) => void;
 }
 
-interface GraphLinkLike {
-  origin_id: number;
-}
-
-interface UpstreamNodeLike {
-  widgets?: TextWidgetLike[];
-}
-
-interface GraphLike {
-  links?: Map<number, GraphLinkLike | undefined> | Record<number, GraphLinkLike | undefined>;
-  getNodeById?(id: number): UpstreamNodeLike | null;
-}
-
 interface StatusNodeLike {
   size?: [number, number];
   widgets?: TextWidgetLike[];
   inputs?: { name: string; link: number | null }[];
-  graph?: GraphLike | null;
+  graph?: UpstreamGraphLike | null;
   addWidget?(
     type: "button",
     name: string,
@@ -94,50 +82,6 @@ function resourceTextWidget(node: StatusNodeLike): TextWidgetLike | undefined {
   return node.widgets?.find((widget) => widget.name === "civitai_resources");
 }
 
-interface LmLoraEntry {
-  name?: string;
-  strength?: number;
-  active?: boolean;
-}
-
-function lmLoraEntries(value: string | number | boolean | object | undefined): LmLoraEntry[] {
-  if (typeof value !== "object" || value === null) return [];
-  const wrapped = (value as { __value__?: LmLoraEntry[] }).__value__;
-  if (Array.isArray(wrapped)) return wrapped;
-  return Array.isArray(value) ? (value as LmLoraEntry[]) : [];
-}
-
-// Best-effort read of the linked loaded_loras producer's widget state, so a
-// preview can include lora rows BEFORE any run. Covers LM's loader (its
-// synced tag-text widget, else the loras panel value) and any node exposing
-// a plain lora-tag string; unreadable producers fall back to last-run rows.
-function upstreamLoadedLoras(node: StatusNodeLike): string {
-  const linkId = node.inputs?.find((input) => input.name === "loaded_loras")?.link;
-  const graph = node.graph;
-  if (linkId === null || linkId === undefined || graph?.getNodeById === undefined) return "";
-  const links = graph.links;
-  const link =
-    links === undefined ? undefined : links instanceof Map ? links.get(linkId) : links[linkId];
-  if (link === undefined) return "";
-  const widgets = graph.getNodeById(link.origin_id)?.widgets ?? [];
-  for (const widget of widgets) {
-    if (typeof widget.value === "string" && widget.value.includes("<lora:")) {
-      return widget.value;
-    }
-  }
-  for (const widget of widgets) {
-    if (widget.name !== "loras") continue;
-    const tags = lmLoraEntries(widget.value)
-      .filter(
-        (entry) =>
-          entry.active !== false && typeof entry.name === "string" && entry.name.length > 0,
-      )
-      .map((entry) => `<lora:${entry.name}:${typeof entry.strength === "number" ? entry.strength : 1}>`);
-    if (tags.length > 0) return tags.join(" ");
-  }
-  return "";
-}
-
 function setResourceText(node: StatusNodeLike, value: string): void {
   const widget = resourceTextWidget(node);
   if (widget === undefined) return;
@@ -172,13 +116,14 @@ async function refreshPreview(node: StatusNodeLike): Promise<void> {
   previewControllers.set(node, controller);
   const text = String(widget.value ?? "");
   // Live upstream widget state beats the last-run snapshot; the snapshot
-  // covers producers whose value we can't read without executing.
+  // only covers producers we can't read without executing (null). "" is an
+  // authoritative zero — an all-disabled panel must not resurrect old rows.
   const upstream = upstreamLoadedLoras(node);
-  const loraEntries = upstream.length > 0 ? [] : (lastLoraEntries.get(node) ?? []);
+  const loraEntries = upstream === null ? (lastLoraEntries.get(node) ?? []) : [];
   const loraHashes = loraEntries
     .map((entry) => (typeof entry.hash === "string" ? entry.hash : ""))
     .filter((hash) => hash.length > 0);
-  if (text.trim().length === 0 && upstream.length === 0) {
+  if (text.trim().length === 0 && (upstream === null || upstream.length === 0)) {
     host.replaceChildren(
       buildStatusList(loraEntries, {
         ...statusOptionsFor(node),
@@ -191,7 +136,7 @@ async function refreshPreview(node: StatusNodeLike): Promise<void> {
     return;
   }
   try {
-    const entries = await fetchPreview(text, loraHashes, upstream, controller.signal);
+    const entries = await fetchPreview(text, loraHashes, upstream ?? "", controller.signal);
     if (previewSeqs.get(node) !== seq) return;
     host.replaceChildren(
       buildStatusList([...loraEntries, ...entries], {

@@ -84,9 +84,10 @@ The in-node status list updates **live**: picker applies, the per-row **✕**
 (removes that line from the textbox), and the **⟳ Refresh resources** button
 (under ＋ Add Resource) all re-parse `civitai_resources` through the node's
 own resolver + cache — no queueing needed. `loaded_loras` is included live:
-the preview reads the linked loader's widget state (LoRA Manager's loader,
-or any node exposing `<lora:…>` tag text), falling back to the last run's
-rows for producers it can't read. Preview renders carry a "queue a prompt to
+the preview reads the linked loader's widget state (LoRA Manager's loras
+panel — honoring per-lora enable toggles, exactly like a run — or any node
+exposing `<lora:…>` tag text), falling back to the last run's rows for
+producers it can't read. Preview renders carry a "queue a prompt to
 see final resource list" note. Loading a saved workflow re-renders the list
 the same way. Hover a row (or its status dot) for what the color means —
 resolved / unverified hash / duplicate / not credited.
@@ -148,7 +149,9 @@ Behavior:
 
 Inputs:
 
-- `loaded_loras`: multiline string containing one or more `<lora:name:weight>` tags
+- `loaded_loras`: multiline string containing one or more `<lora:name:weight>`
+  tags; LoRA Manager's dual-strength form `<lora:name:model:clip>` is accepted
+  too (the model strength is the credited weight)
 
 Outputs:
 

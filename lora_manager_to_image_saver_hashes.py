@@ -13,7 +13,9 @@ except ImportError:
 from comfy_api.v0_0_2 import ComfyExtension, io
 
 
-LORA_PATTERN = re.compile(r"<lora:([^:>]+)(?::([^:>]+))?>", re.IGNORECASE)
+# LoRA Manager emits 3-segment tags when model and clip strength differ
+# (<lora:name:model:clip>); the weight we credit is the model strength.
+LORA_PATTERN = re.compile(r"<lora:([^:>]+)(?::([^:>]+))?(?::([^:>]+))?>", re.IGNORECASE)
 KNOWN_LORA_EXTENSIONS = (
     ".safetensors",
     ".ckpt",
@@ -33,7 +35,7 @@ class HashBridgeResult:
 
 def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
     parsed: list[tuple[str, float]] = []
-    for name, raw_weight in LORA_PATTERN.findall(value or ""):
+    for name, raw_weight, _clip_strength in LORA_PATTERN.findall(value or ""):
         normalized_name = name.strip()
         if not normalized_name:
             continue
