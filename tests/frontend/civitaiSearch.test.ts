@@ -109,9 +109,49 @@ describe("searchModels", () => {
     expect(item.versions).toEqual([{ id: 3114726, name: "v0_8", baseModel: "Anima" }]);
   });
 
-  it("throws on http errors", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 400 })));
+  it("throws on http errors without retrying client errors", async () => {
+    const spy = vi.fn(async () => new Response("nope", { status: 400 }));
+    vi.stubGlobal("fetch", spy);
     await expect(searchModels({}, new AbortController().signal)).rejects.toThrow("400");
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries once on 5xx after a short backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          calls += 1;
+          return calls === 1
+            ? new Response("", { status: 503 })
+            : new Response(JSON.stringify(payload), { status: 200 });
+        }),
+      );
+      const pending = searchModels({ query: "anima" }, new AbortController().signal);
+      await vi.advanceTimersByTimeAsync(800);
+      const page = await pending;
+      expect(calls).toBe(2);
+      expect(page.items).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborting during the retry backoff rejects with AbortError", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+      const controller = new AbortController();
+      const pending = searchModels({}, controller.signal);
+      const expectation = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(100);
+      controller.abort();
+      await expectation;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sends no custom headers (CORS simple request)", async () => {

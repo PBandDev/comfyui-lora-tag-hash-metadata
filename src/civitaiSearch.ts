@@ -119,8 +119,29 @@ function mapModel(raw: RawModel): ModelCard | null {
   };
 }
 
+function backoff(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort);
+  });
+}
+
 export async function searchModels(q: SearchQuery, signal: AbortSignal): Promise<SearchPage> {
-  const response = await fetch(buildSearchUrl(q), { signal });
+  const url = buildSearchUrl(q);
+  let response = await fetch(url, { signal });
+  if (response.status >= 500) {
+    // civitai intermittently answers 5xx; one short retry rides out most
+    // flaps (the python resolver retries the same way).
+    await backoff(750, signal);
+    response = await fetch(url, { signal });
+  }
   if (!response.ok) {
     throw new Error(`civitai search failed: HTTP ${response.status}`);
   }
