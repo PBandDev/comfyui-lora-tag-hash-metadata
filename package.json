@@ -7,9 +7,15 @@
     "dev": "tsc && vite build --watch",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "setup:e2e": "playwright install --with-deps chromium && node scripts/setup-e2e-comfy.mjs && node scripts/setup-e2e-packs.mjs",
+    "test:e2e": "pnpm build && pnpm setup:e2e && playwright test",
+    "test:frontend": "vitest run",
+    "test:backend": "uv run python -m pytest tests/python -q",
+    "test:unit": "pnpm test:frontend && pnpm test:backend",
+    "test": "pnpm test:unit && pnpm test:e2e",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "e2e:serve": "pnpm build && pnpm setup:e2e && node scripts/e2e-serve.mjs"
   },
   "keywords": [
     "comfyui",
@@ -29,8 +35,10 @@
   },
   "devDependencies": {
     "@comfyorg/comfyui-frontend-types": "^1.32.1",
+    "@playwright/test": "^1.59.1",
     "@types/node": "^24.10.0",
     "@vitest/coverage-v8": "^4.0.16",
+    "jsdom": "^29.1.1",
     "vitest": "^4.0.16"
   }
 }

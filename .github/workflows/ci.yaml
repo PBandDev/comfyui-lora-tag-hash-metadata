@@ -33,6 +33,18 @@ jobs:
           node-version: 20
           cache: "pnpm"
 
+      - name: Cache civitai lora fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/e2e/fixtures
+          key: civitai-fixtures-${{ hashFiles('tests/e2e/fixtures.lock.json') }}
+
+      - name: Cache e2e ComfyUI environment
+        uses: actions/cache@v4
+        with:
+          path: .e2e
+          key: e2e-env-${{ runner.os }}-${{ hashFiles('e2e.config.mjs', 'tests/e2e/versions.lock.json') }}
+
       - name: Install dependencies
         run: pnpm install
 
@@ -42,10 +54,7 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Run Python tests
-        run: uv run pytest tests/python/test_lora_manager_to_image_saver_hashes.py -q
-
-      - name: Run tests
+      - name: Run full test suite (unit + e2e, live civitai API)
         run: pnpm test
 
       - name: Build

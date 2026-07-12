@@ -1,19 +1,15 @@
 # ComfyUI LoRA Tag Hash Metadata
 
-ComfyUI custom node that converts `<lora:name:weight>` text into `Name:HASH:Weight`
-metadata strings for downstream nodes such as Civitai-aware metadata savers.
+ComfyUI custom nodes that credit your generation resources on CivitAI by
+embedding `Name:AUTOV2[:Weight]` hash metadata into saved images.
+
+- **Civitai Resources To Hash Metadata** (v2, primary) — credits local lora
+  tags AND any CivitAI resource (workflows, text encoders, detailers, …) from
+  pasted URLs, hashes, or AIR URNs, with an in-node status list.
+- **LoRA Tags To Hash Metadata** (v1) — converts `<lora:name:weight>` text
+  into `Name:HASH:Weight` strings. Still supported.
 
 Created with [comfyui-custom-node-template](https://github.com/PBandDev/comfyui-custom-node-template)
-
-Primary use case:
-
-- feed `loaded_loras` from LoRA Manager into `LoRA Tags To Hash Metadata`
-- connect `additional_hashes` into `Image Saver Metadata.additional_hashes`
-- preserve LoRA hash metadata so downstream nodes can resolve Civitai model info
-
-The node is generic on purpose. Any node that outputs `<lora:name:weight>` text can
-feed it, and any downstream node that expects `Name:HASH:Weight` strings can consume
-the result.
 
 ## Install
 
@@ -31,7 +27,120 @@ If you use the ComfyUI CLI instead of the Manager UI:
 comfy node install comfyui-lora-tag-hash-metadata
 ```
 
-## Node
+## Civitai Resources To Hash Metadata (v2)
+
+- Node id: `CivitaiResourcesToHashMetadata`
+- Display name: `Civitai Resources To Hash Metadata`
+- Category: `utils/metadata`
+
+CivitAI auto-links image resources purely by file hash — including resource
+types it can't detect from prompts, like whole workflows, text encoders
+("Other"), and selectively-applied detailer LoRAs. This node resolves each
+resource you list to its AutoV2 hash via the CivitAI API and emits it into
+`additional_hashes` so uploads credit the creators automatically.
+
+![Civitai Resources To Hash Metadata node](assets/civitai-resources-node.png)
+
+Typical wiring:
+
+```text
+Lora Loader (LoraManager).loaded_loras
+  -> Civitai Resources To Hash Metadata.loaded_loras
+  -> Image Saver Metadata.additional_hashes
+```
+
+Example `civitai_resources` input:
+
+```text
+# workflows, text encoders, detailers — anything on civitai
+https://civitai.red/models/1362968/workflow-for-anima-and-sdxl-noobai-xlillustrious-xl
+https://civitai.red/models/2598886/anima-text-encoder-qwen3-06b-heretic-abliterated-uncensored
+https://civitai.com/models/2767064/anima-detailer?modelVersionId=3114726 0.8
+CD64AF8696
+urn:air:anima:lora:civitai:2767064@3114726
+```
+
+### ＋ Add Resource picker
+
+The node's **＋ Add Resource** button opens a searchable picker so you never
+have to hand-copy URLs:
+
+- **CivitAI search** tab: live search (all content types, no filtering),
+  type chips, sort, load-more; picking a result appends a version-pinned URL
+  line to the textbox. Lora-ish results take an optional weight.
+- **Local · LoRA Manager** tab (shown only when
+  [LoRA Manager](https://github.com/willmiao/ComfyUI-Lora-Manager) is
+  installed): pick from your local loras — matched files insert their civitai
+  link, unmatched files insert their AutoV2 hash.
+- Entries already in the textbox show **Remove** instead of Add, so the picker
+  can also clean up. The textbox stays fully hand-editable either way.
+- Result names link to their civitai page; lora-ish results take an optional
+  weight (the small `wt` box).
+- When a query returns nothing: civitai's public API hides some models
+  (e.g. flagged ones) — the picker links the same search on the civitai site.
+  Pasting such a model's version-pinned URL into the textbox still credits it.
+
+The in-node status list updates **live**: picker applies, the per-row **✕**
+(removes that line from the textbox), and the **⟳ Refresh resources** button
+(under ＋ Add Resource) all re-parse `civitai_resources` through the node's
+own resolver + cache — no queueing needed. `loaded_loras` is included live:
+the preview reads the linked loader's widget state (LoRA Manager's loader,
+or any node exposing `<lora:…>` tag text), falling back to the last run's
+rows for producers it can't read. Preview renders carry a "queue a prompt to
+see final resource list" note. Loading a saved workflow re-renders the list
+the same way. Hover a row (or its status dot) for what the color means —
+resolved / unverified hash / duplicate / not credited.
+
+Inputs:
+
+- `loaded_loras` (optional link): `<lora:name:weight>` text, e.g. from LoRA
+  Manager — handled exactly like v1
+- `civitai_resources` (multiline textbox), one resource per line:
+  - model URLs on any civitai domain (`.com`/`.red`/`.green`), optionally
+    pinned with `?modelVersionId=…` — unpinned URLs resolve to the model's
+    latest version
+  - AutoV2 hashes (10 hex) or full SHA256 hashes (64 hex)
+  - AIR URNs like `urn:air:anima:lora:civitai:2767064@3114726` (`+fileId`
+    honored)
+  - optional trailing weight: `<line> 0.8`
+  - `#` comment lines and blanks are ignored
+  - bare numeric IDs are rejected (ambiguous)
+
+Outputs:
+
+- `additional_hashes`: comma-separated `Name:AUTOV2[:Weight]` entries
+  (weight only when explicit; lora tags keep their weights)
+- `resolved` / `missing`: comma-separated names for quick display
+- `resources_json`: structured JSON of every entry (status, type, version,
+  hash, links) for downstream tooling
+
+Behavior:
+
+- in-node status list after each run: card rows with a preview thumbnail
+  (civitai preview for URL/hash/AIR entries, local sidecar preview via
+  ComfyUI's stock model-preview route for loras), name linked to civitai,
+  type · version subline, and a status accent (green resolved / amber
+  duplicate / red failed with reason)
+- the list is capped at ~320px and scrolls inside the node — it never
+  overflows the node bounds
+- executes standalone (output node) — no downstream saver needed to check
+  your list
+- persistent on-disk cache under ComfyUI's user directory: version- and
+  hash-pinned lookups cache forever, unpinned model URLs refresh after 24h;
+  cached entries keep working offline
+- failures never abort the queue — bad lines land in `missing` and the
+  status list
+- names are sanitized for Image Saver (`,`/`:` stripped, never literally
+  `vae`), and all-decimal hashes get an explicit `:1.0` so the hash can't be
+  misparsed as a weight
+
+> **Image Saver footgun:** `Name:HASH:Weight` (3-part) entries are only
+> parsed when Image Saver Metadata's `download_civitai_data` is **True**.
+> With it False, 3-part entries are silently dropped — this affects all v1
+> output (always weighted) and weighted v2 entries. Keep
+> `download_civitai_data=True` (the default).
+
+## LoRA Tags To Hash Metadata (v1)
 
 - Node id: `LoraTagsToHashMetadata`
 - Display name: `LoRA Tags To Hash Metadata`
@@ -62,35 +171,28 @@ Behavior:
 2. Run `pnpm install`
 3. Run `pnpm dev` to watch for changes and rebuild `dist/`
 
-### Python Test Workflow
-
-Use `uv` for Python-side tooling:
-
-```bash
-uv sync
-uv run pytest
-```
-
 ```bash
 pnpm install    # Install dependencies
 pnpm dev        # Watch mode - rebuilds dist/ on change
 pnpm build      # Build for production
-pnpm test       # Run tests
+pnpm test       # EVERYTHING: vitest + pytest + full e2e (live civitai API)
 ```
 
 **Note:** Reload ComfyUI frontend (browser refresh) for JS changes. Restart ComfyUI server for Python changes.
 
-## LoRA Tag Hash Metadata
+### Testing
 
-Typical wiring:
+One suite, no tiers: `pnpm test` runs frontend unit tests, backend Python
+tests, and a full end-to-end run against a repo-local pinned ComfyUI (with
+LoRA Manager + Image Saver + real fixture loras + the live civitai API) —
+every time, locally and in CI. See [docs/TESTING.md](docs/TESTING.md) for the
+harness details, manual serve mode (`pnpm e2e:serve`), and user stories.
 
-```text
-Lora Loader (LoraManager).loaded_loras
-  -> LoRA Tags To Hash Metadata.loaded_loras
-  -> Image Saver Metadata.additional_hashes
+```bash
+uv sync                 # python deps
+pnpm test:unit          # fast lanes only
+pnpm test:e2e           # provision .e2e/ + playwright
 ```
-
-You can also feed any other text source that emits the same tag syntax.
 
 ## Publishing to ComfyUI Registry
 

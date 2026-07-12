@@ -447,6 +447,31 @@ def test_normalize_lora_reference_strips_known_model_extension_only() -> None:
     ) == "anima/base model/anima_preview2_rdbt_finetuned_cfg_distilled_v0.23"
 
 
+def test_v1_result_gains_structured_entries(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    foo.write_bytes(b"abc")
+
+    result = build_additional_hashes(
+        "<lora:foo:0.8> <lora:bar:1.2>",
+        lambda name: str(foo) if name == "foo" else None,
+    )
+
+    expected_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    assert result.entries[0] == {
+        "kind": "lora",
+        "name": "foo",
+        "hash": expected_hash,
+        "weight": 0.8,
+        "status": "resolved",
+    }
+    assert result.entries[1] == {
+        "kind": "lora",
+        "name": "bar",
+        "status": "missing",
+        "error": "not found in loras folders",
+    }
+
+
 def test_sha256_10_hashes_without_path_read_bytes(
     tmp_path: Path,
     monkeypatch,
