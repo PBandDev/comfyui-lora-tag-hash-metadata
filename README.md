@@ -70,8 +70,13 @@ have to hand-copy URLs:
   line to the textbox. Lora-ish results take an optional weight.
 - **Local · LoRA Manager** tab (shown only when
   [LoRA Manager](https://github.com/willmiao/ComfyUI-Lora-Manager) is
-  installed): pick from your local loras — matched files insert their civitai
-  link, unmatched files insert their AutoV2 hash.
+  installed): pick from every model type LoRA Manager indexes — loras,
+  checkpoints, and embeddings, with kind chips to narrow. Matched files insert
+  their civitai link, unmatched files insert their AutoV2 hash. Weight inputs
+  appear for loras and embeddings only; checkpoints take none. Note: LoRA
+  Manager hashes checkpoints lazily — an unmatched checkpoint it hasn't
+  hashed yet shows a disabled "no hash" button until you hash/match it in
+  LoRA Manager.
 - Entries already in the textbox show **Remove** instead of Add, so the picker
   can also clean up. The textbox stays fully hand-editable either way.
 - Result names link to their civitai page; lora-ish results take an optional

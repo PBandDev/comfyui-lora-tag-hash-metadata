@@ -80,23 +80,63 @@ function stopExistingServer(): boolean {
   return true;
 }
 
-async function waitForLoraManagerScan(baseURL: string): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    try {
-      // Pin on a sha-locked fixture (fixtures.lock.json) — any cached row is
-      // not proof the scan surfaced OUR loras.
-      const response = await fetch(`${baseURL}/api/lm/loras/list?search=fisheye_slider_v10&fuzzy=true&page_size=10`);
-      if (response.ok) {
-        const data = (await response.json()) as { items?: { file_name?: string }[] };
-        if (data.items?.some((item) => item.file_name === "fisheye_slider_v10") === true) return;
-      }
-    } catch {
-      // server still warming up — keep polling
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2000));
+// The sidecar setup-e2e-packs.mjs seeded is the on-disk truth for a synthetic
+// fixture's hash — gating on the EXACT value catches LM serving a stale
+// SQLite row after a fixture edit, which "sha256 is non-empty" would miss.
+function sidecarSha(dir: string, name: string): string | null {
+  try {
+    const sidecar = resolve(workspaceDir, "models", dir, `${name}.metadata.json`);
+    const parsed = JSON.parse(readFileSync(sidecar, "utf8")) as { sha256?: string };
+    return typeof parsed.sha256 === "string" && parsed.sha256.length > 0 ? parsed.sha256 : null;
+  } catch {
+    return null;
   }
-  throw new Error("LoRA Manager scan did not surface fixture loras within 120s");
+}
+
+async function waitForLoraManagerScan(baseURL: string): Promise<void> {
+  // Pin on sha-locked fixtures — any cached row is not proof the scan
+  // surfaced OUR files. The checkpoint/embedding fixtures are synthetic
+  // (setup-e2e-packs.mjs) with pre-seeded sidecar hashes, so sha256 must
+  // match the sidecar exactly on first scan.
+  const gates = [
+    { kind: "loras", file: "fisheye_slider_v10", sha: null as string | null },
+    { kind: "checkpoints", file: "clth_ckpt_fixture", sha: sidecarSha("checkpoints", "clth_ckpt_fixture") },
+    { kind: "embeddings", file: "clth_embed_fixture", sha: sidecarSha("embeddings", "clth_embed_fixture") },
+  ];
+  const pending = new Set(gates);
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline && pending.size > 0) {
+    for (const gate of [...pending]) {
+      try {
+        const response = await fetch(
+          `${baseURL}/api/lm/${gate.kind}/list?search=${gate.file}&fuzzy=true&fuzzy_search=true&page_size=10`,
+        );
+        if (response.ok) {
+          const data = (await response.json()) as {
+            items?: { file_name?: string; sha256?: string }[];
+          };
+          const surfaced = data.items?.some(
+            (item) =>
+              item.file_name === gate.file &&
+              (item.sha256 ?? "") !== "" &&
+              (gate.sha === null || item.sha256 === gate.sha),
+          );
+          if (surfaced === true) pending.delete(gate);
+        }
+      } catch {
+        // server still warming up — keep polling
+      }
+    }
+    if (pending.size > 0) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 2000));
+    }
+  }
+  if (pending.size > 0) {
+    const missing = [...pending].map((gate) => `${gate.kind}/${gate.file}`).join(", ");
+    throw new Error(
+      `LoRA Manager scan did not surface fixtures within 120s (stale-cache sha mismatch also lands here): ${missing}`,
+    );
+  }
 }
 
 async function waitForReady() {

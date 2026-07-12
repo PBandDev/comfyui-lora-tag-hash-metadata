@@ -1,6 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { e2eConfig } from "../e2e.config.mjs";
@@ -110,6 +119,94 @@ function ensureFixtures() {
   }
 }
 
+// Minimal valid safetensors: 8-byte LE header length + JSON header + tensor
+// data. LoRA Manager's checkpoint/embedding scanners only hash the file and
+// read this header, so tiny deterministic files stand in for multi-GB models.
+function syntheticSafetensors(fixtureKind, tensorName) {
+  const header = Buffer.from(
+    JSON.stringify({
+      __metadata__: { clth_fixture: fixtureKind },
+      [tensorName]: { dtype: "F32", shape: [4], data_offsets: [0, 16] },
+    }),
+    "utf8",
+  );
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64LE(BigInt(header.length));
+  return Buffer.concat([length, header, Buffer.alloc(16)]);
+}
+
+function ensureSyntheticFixtures() {
+  const synthetic = [
+    { dir: "checkpoints", filename: "clth_ckpt_fixture.safetensors", kind: "checkpoint", tensor: "model.weight" },
+    { dir: "embeddings", filename: "clth_embed_fixture.safetensors", kind: "embedding", tensor: "emb_params" },
+  ];
+  let fixturesChanged = false;
+  for (const fixture of synthetic) {
+    const content = syntheticSafetensors(fixture.kind, fixture.tensor);
+    const sha256 = createHash("sha256").update(content).digest("hex");
+    const targetDir = join(comfyDir, "models", fixture.dir);
+    mkdirSync(targetDir, { recursive: true });
+    const target = join(targetDir, fixture.filename);
+    if (
+      !existsSync(target) ||
+      createHash("sha256").update(readFileSync(target)).digest("hex") !== sha256
+    ) {
+      writeFileSync(target, content);
+      fixturesChanged = true;
+    }
+    // Pre-seed the LoRA Manager sidecar with the completed hash: LM hashes
+    // checkpoints LAZILY (hash_status stays "pending" until something asks),
+    // and the picker e2e needs a deterministic sha256 on first scan.
+    const baseName = fixture.filename.replace(/\.safetensors$/, "");
+    const stats = statSync(target);
+    writeFileSync(
+      join(targetDir, `${baseName}.metadata.json`),
+      JSON.stringify(
+        {
+          file_name: baseName,
+          model_name: baseName,
+          file_path: target.replaceAll("\\", "/"),
+          size: stats.size,
+          modified: stats.mtimeMs / 1000,
+          sha256,
+          base_model: "Unknown",
+          preview_url: "",
+          preview_nsfw_level: 0,
+          notes: "",
+          from_civitai: false,
+          civitai: {},
+          tags: [],
+          modelDescription: "",
+          civitai_deleted: false,
+          favorite: false,
+          exclude: false,
+          db_checked: false,
+          skip_metadata_refresh: false,
+          metadata_source: null,
+          last_checked_at: 0,
+          hash_status: "completed",
+          sub_type: fixture.kind,
+        },
+        null,
+        2,
+      ),
+    );
+    console.log(
+      `[setup:packs] synthetic ${fixture.dir} fixture sha256=${sha256.toUpperCase()}`,
+    );
+  }
+  if (fixturesChanged) {
+    // LM hydrates from its SQLite snapshot on boot and never re-reads
+    // sidecars for already-known paths — without this purge, edited synthetic
+    // fixtures would keep serving their STALE cached sha256 forever.
+    rmSync(join(customNodesDir, "ComfyUI-Lora-Manager", "cache", "model"), {
+      recursive: true,
+      force: true,
+    });
+    console.log("[setup:packs] synthetic fixtures changed — purged LM model cache");
+  }
+}
+
 assertNotSymlink(resolve(projectRoot, ".e2e"), "e2e root");
 assertNotSymlink(comfyDir, "e2e ComfyUI workspace");
 assertNotSymlink(customNodesDir, "e2e custom_nodes dir");
@@ -117,4 +214,5 @@ ensurePinnedPacks();
 writePortableLoraManagerSettings();
 installHarnessNodes();
 ensureFixtures();
+ensureSyntheticFixtures();
 console.log("[setup:packs] e2e packs + fixtures ready");
