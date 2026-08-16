@@ -21,10 +21,17 @@ declare global {
 
 const V2_NODE_ID = "CivitaiResourcesToHashMetadata";
 const WIDGET_NAME = "civitai_status";
-// The node reserves [min,max] px for the widget; content beyond the cap
-// scrolls INSIDE the host so it can never overflow the node bounds.
-const WIDGET_MIN_HEIGHT = 60;
-const WIDGET_MAX_HEIGHT = 320;
+// The frontend insets a DOM widget's element 10px on each side of its layout
+// slot, so every height here pays this overhead on top of the visible px.
+const DOM_WIDGET_INSET = 20;
+// One visible status row: 40px thumb + 2*5px row padding + 2*1px border +
+// 2*6px list padding. The list reserves exactly this much, so the node's
+// default height shows a single row; extra node height all flows here (no
+// maxHeight = the only flexible widget), and overflow scrolls inside the host.
+const STATUS_MIN_HEIGHT = 64 + DOM_WIDGET_INSET;
+// The core textarea is otherwise the second flexible widget and would eat
+// half of every resize — pin it at 4 lines (10px font, ~12px/line + padding).
+const TEXTAREA_HEIGHT = 52 + DOM_WIDGET_INSET;
 
 interface StatusMessage {
   civitai_resources_status?: string[];
@@ -35,10 +42,13 @@ interface TextWidgetLike {
   name: string;
   value?: string | number | boolean | object;
   callback?: (value: string) => void;
+  options?: {
+    getMinHeight?: () => number;
+    getMaxHeight?: () => number;
+  };
 }
 
 interface StatusNodeLike {
-  size?: [number, number];
   widgets?: TextWidgetLike[];
   inputs?: { name: string; link: number | null }[];
   graph?: UpstreamGraphLike | null;
@@ -57,11 +67,8 @@ interface StatusNodeLike {
       serialize: boolean;
       hideOnZoom: boolean;
       getMinHeight: () => number;
-      getMaxHeight: () => number;
     },
   ): { serialize?: boolean } | undefined;
-  computeSize?(): [number, number];
-  setSize?(size: [number, number]): void;
   setDirtyCanvas?(foreground: boolean, background: boolean): void;
   onNodeCreated?(): void;
   onExecuted?(message: StatusMessage): void;
@@ -132,7 +139,6 @@ async function refreshPreview(node: StatusNodeLike): Promise<void> {
           : {}),
       }),
     );
-    syncNodeSize(node);
     return;
   }
   try {
@@ -144,7 +150,6 @@ async function refreshPreview(node: StatusNodeLike): Promise<void> {
         note: "queue a prompt to see final resource list",
       }),
     );
-    syncNodeSize(node);
   } catch {
     // Preview is best-effort (server restarting, offline) — keep whatever the
     // list currently shows rather than flashing an error state.
@@ -158,13 +163,10 @@ function createStatusHost(node: StatusNodeLike): HTMLDivElement | null {
   const host = document.createElement("div");
   host.className = "clth-host";
   host.dataset.widget = WIDGET_NAME;
-  host.style.maxHeight = `${WIDGET_MAX_HEIGHT}px`;
   const widget = node.addDOMWidget(WIDGET_NAME, "div", host, {
     serialize: false,
     hideOnZoom: false,
-    getMinHeight: () =>
-      Math.min(WIDGET_MAX_HEIGHT, Math.max(WIDGET_MIN_HEIGHT, host.scrollHeight)),
-    getMaxHeight: () => WIDGET_MAX_HEIGHT,
+    getMinHeight: () => STATUS_MIN_HEIGHT,
   });
   if (widget !== undefined) {
     widget.serialize = false;
@@ -230,17 +232,13 @@ function statusHostFor(node: StatusNodeLike): HTMLDivElement | null {
   return createStatusHost(node);
 }
 
-function syncNodeSize(node: StatusNodeLike): void {
-  // Canvas mode auto-grows but never shrinks, and scrollHeight is only valid
-  // after layout — recompute on the next frame.
-  requestAnimationFrame(() => {
-    if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
-      const computed = node.computeSize();
-      const width = Math.max(node.size?.[0] ?? computed[0], computed[0]);
-      node.setSize([width, computed[1]]);
-    }
-    node.setDirtyCanvas?.(true, true);
-  });
+// The textbox stays a fixed 4-line strip so a node resize only ever
+// grows/shrinks the status list below it.
+function pinResourceTextareaHeight(node: StatusNodeLike): void {
+  const widget = resourceTextWidget(node);
+  if (widget?.options === undefined) return;
+  widget.options.getMinHeight = () => TEXTAREA_HEIGHT;
+  widget.options.getMaxHeight = () => TEXTAREA_HEIGHT;
 }
 
 app.registerExtension({
@@ -253,10 +251,10 @@ app.registerExtension({
     const originalCreated = proto.onNodeCreated;
     proto.onNodeCreated = function (this: StatusNodeLike) {
       originalCreated?.call(this);
+      pinResourceTextareaHeight(this);
       createPickerButton(this);
       createRefreshButton(this);
       createStatusHost(this);
-      syncNodeSize(this);
     };
     const originalRemoved = proto.onRemoved;
     proto.onRemoved = function (this: StatusNodeLike) {
@@ -312,7 +310,6 @@ app.registerExtension({
       previewSeqs.set(this, (previewSeqs.get(this) ?? 0) + 1);
       previewControllers.get(this)?.abort();
       host.replaceChildren(buildStatusList(entries, statusOptionsFor(this)));
-      syncNodeSize(this);
     };
   },
   settings: [

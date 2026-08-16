@@ -7,6 +7,8 @@ interface WidgetLike {
 
 interface GraphNodeLike {
   widgets?: WidgetLike[];
+  size?: [number, number];
+  setSize?(size: [number, number]): void;
 }
 
 interface GraphLike {
@@ -66,7 +68,51 @@ test("status list renders success and failure rows", async ({ page }) => {
   const bounded = await page.evaluate(() => {
     const host = document.querySelector<HTMLDivElement>(".clth-host");
     if (host === null) return false;
-    return host.clientHeight <= 320 && host.scrollHeight >= host.clientHeight;
+    return host.scrollHeight >= host.clientHeight;
   });
   expect(bounded).toBe(true);
+});
+
+test("node resize flexes the status list only; textarea stays pinned", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(() => window.app?.graph !== undefined);
+
+  const created = await page.evaluate(() => {
+    window.app.graph?.clear();
+    const node = window.LiteGraph.createNode("CivitaiResourcesToHashMetadata");
+    if (node === null) return false;
+    window.app.graph?.add(node);
+    return true;
+  });
+  expect(created).toBe(true);
+  await expect(page.locator(".clth-host")).toBeVisible();
+
+  const measure = () =>
+    page.evaluate(() => {
+      const host = document.querySelector<HTMLDivElement>(".clth-host");
+      const textarea = document.querySelector<HTMLTextAreaElement>(".comfy-multiline-input");
+      return {
+        host: host?.clientHeight ?? -1,
+        textarea: textarea?.clientHeight ?? -1,
+      };
+    });
+
+  const before = await measure();
+  expect(before.host).toBeGreaterThan(0);
+  expect(before.textarea).toBeGreaterThan(0);
+
+  const resized = await page.evaluate(() => {
+    const graph = window.app.graph as unknown as { nodes?: GraphNodeLike[] } | undefined;
+    const target = graph?.nodes?.[0];
+    if (target?.size === undefined || typeof target.setSize !== "function") return false;
+    target.setSize([target.size[0], target.size[1] + 150]);
+    return true;
+  });
+  expect(resized).toBe(true);
+
+  // All extra height goes to the status list; the textbox strip must not move.
+  await expect
+    .poll(async () => (await measure()).host, { timeout: 5_000 })
+    .toBeGreaterThanOrEqual(before.host + 140);
+  expect((await measure()).textarea).toBe(before.textarea);
 });
