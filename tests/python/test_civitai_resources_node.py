@@ -527,6 +527,7 @@ def test_build_report_dedups_by_hash_lora_wins(tmp_path: Path) -> None:
         fetch=fetch,
     )
     assert report.additional_hashes == f"foo:{autov2}:0.8"  # single entry, lora weight kept
+    assert report.lora_hashes == f'Lora hashes: "foo: {autov2}"'  # duplicate row not repeated
     payload = json.loads(report.resources_json)
     assert [e["status"] for e in payload] == ["resolved", "duplicate"]
 
@@ -545,6 +546,7 @@ def test_v2_schema_io() -> None:
         "resolved",
         "missing",
         "resources_json",
+        "lora_hashes",
     ]
     assert schema.is_output_node is True
 
@@ -560,6 +562,8 @@ def test_v2_execute_returns_ui_payload(tmp_path: Path, monkeypatch) -> None:
 
     resources_json = output.args[3]
     assert output.args[:3] == ("", "", "not a url")
+    assert len(output.args) == 5
+    assert output.args[4] == ""  # lora_hashes: nothing resolved -> empty fragment
     payload = json.loads(resources_json)
     assert len(payload) == 1
     assert payload[0]["status"] == "missing"
@@ -715,3 +719,55 @@ def test_execute_ui_echoes_textbox_input(monkeypatch) -> None:
     out = cnode.CivitaiResourcesToHashMetadata.execute(civitai_resources="THE TEXT")
     assert out.ui["civitai_resources_input"] == ["THE TEXT"]
     assert out.ui["civitai_resources_status"] == ["[]"]
+
+
+def test_build_report_lora_hashes_includes_civitai_lora_types_only(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    foo.write_bytes(b"abc")
+    foo_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    workflow_version = {
+        "id": 500,
+        "modelId": 400,
+        "name": "v1",
+        "model": {"name": "Some Workflow", "type": "Workflows"},
+        "files": [{"id": 9, "hashes": {"AutoV2": "ABCDEF1234"}}],
+    }
+    locon_version = {
+        "id": 600,
+        "modelId": 700,
+        "name": "v1",
+        "model": {"name": "Style LoCon", "type": "LoCon"},
+        "files": [{"id": 10, "hashes": {"AutoV2": "FEDCBA9876"}}],
+    }
+    fetch = _fake_fetch(
+        {
+            "/api/v1/model-versions/3114726": VERSION_3114726,
+            "/api/v1/model-versions/500": workflow_version,
+            "/api/v1/model-versions/600": locon_version,
+        }
+    )
+    report = cnode.build_resource_report(
+        loaded_loras="<lora:nested/foo:0.8>",
+        civitai_resources=(
+            "https://civitai.com/models/400?modelVersionId=500\n"
+            "https://civitai.com/models/2767064?modelVersionId=3114726 0.8\n"
+            "https://civitai.com/models/700?modelVersionId=600\n"
+        ),
+        lora_resolver=lambda name: str(foo) if name == "nested/foo" else None,
+        cache=cnode.ResolveCache(tmp_path / "c.json"),
+        fetch=fetch,
+    )
+    # lora tags first (by file stem, not tag path), then civitai LORA-ish rows
+    # in line order; the workflow is credited via additional_hashes but is not
+    # a lora.
+    assert report.lora_hashes == (
+        f'Lora hashes: "foo: {foo_hash}, Anima Detailer: CD64AF8696, Style LoCon: FEDCBA9876"'
+    )
+    assert "Some Workflow:ABCDEF1234" in report.additional_hashes
+
+
+def test_file_autov2_rejects_trailing_newline() -> None:
+    # re.match + `$` accepts "…\n"; a stray newline would break the
+    # single-line Lora hashes fragment downstream.
+    assert cnode._file_autov2({"hashes": {"AutoV2": "ABCDEF1234\n"}}) is None
+    assert cnode._file_autov2({"hashes": {"AutoV2": "abcdef1234"}}) == "ABCDEF1234"

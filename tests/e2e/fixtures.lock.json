@@ -13,13 +13,6 @@
       "sha256": "40B82748583B24707FA91BF5DEFAFE333EC407957E612441878B8E6938A74437",
       "autov2": "40B8274858",
       "sizeKB": 1612
-    },
-    {
-      "filename": "age_slider_v20.safetensors",
-      "url": "https://civitai.com/api/download/models/143150",
-      "sha256": "90ED0D9B22064AF50B5291870C977C32D6ED4426FED3E950D73E9861D76D3200",
-      "autov2": "90ED0D9B22",
-      "sizeKB": 3169
     }
   ]
 }
