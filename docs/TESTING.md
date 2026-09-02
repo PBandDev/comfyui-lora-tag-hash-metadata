@@ -29,7 +29,7 @@ the test.
 - Third-party packs are pinned by commit SHA in `tests/e2e/versions.lock.json`
   (ComfyUI-Lora-Manager v1.1.6, ComfyUI-Image-Saver v1.23.0) and installed by
   `scripts/setup-e2e-packs.mjs`.
-- Tiny real civitai LoRA fixtures (~6 MB total) are pinned by SHA256 in
+- Tiny real civitai LoRA fixtures (~3 MB total) are pinned by SHA256 in
   `tests/e2e/fixtures.lock.json`, downloaded on miss into
   `tests/e2e/fixtures/loras/` (gitignored, cached in CI), and COPIED into the
   workspace `models/loras` (LoRA Manager writes `.metadata.json` sidecars next
@@ -49,7 +49,7 @@ If a pin changes or the scoped install gets stale, delete `.e2e/` and rerun
 ```bash
 pnpm install
 pnpm build
-pnpm setup:e2e     # first run ~5-10 min (ComfyUI + cpu torch + chromium + 6 MB fixtures)
+pnpm setup:e2e     # first run ~5-10 min (ComfyUI + cpu torch + chromium + 3 MB fixtures)
 pnpm e2e:serve     # foreground; Ctrl+C to stop
 # open http://127.0.0.1:8199
 ```
@@ -66,9 +66,10 @@ pnpm e2e:serve     # foreground; Ctrl+C to stop
    fp32…)", "Anima Detailer (LORA · v0_8)" — each a clickable civitai link.
 2. **FULL CHAIN** — E2E Dummy Model → Lora Loader (LoraManager) [pick
    fisheye_slider_v10] → v2 node (`loaded_loras`) → Image Saver Metadata
-   (`additional_hashes`) + EmptyImage → Image Saver Simple. Queue. EXPECT:
-   ✓ row for the lora; saved PNG in `.e2e/comfyui/output/` whose parameters
-   text credits it.
+   (`additional_hashes` ← `additional_hashes`, `custom` ← `lora_hashes`) +
+   EmptyImage → Image Saver Simple. Queue. EXPECT: ✓ row for the lora; saved
+   PNG in `.e2e/comfyui/output/` whose parameters text credits it AND carries
+   `Lora hashes: "fisheye_slider_v10: D6A3AC6F8A"` in the settings line.
 3. **FAIL STATES** — Add lines: `https://civitai.com/models/999999999`,
    `not a url`, `2767064`. EXPECT: red ✗ rows with reasons (not found /
    unrecognized / bare IDs rejected); queue COMPLETES; other rows still ✓;

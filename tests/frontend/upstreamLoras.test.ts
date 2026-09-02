@@ -47,7 +47,7 @@ describe("upstreamLoadedLoras", () => {
   it("excludes panel entries toggled inactive", () => {
     const node = host([
       panel([
-        { name: "age_slider_v20", strength: 1, active: false },
+        { name: "weather_slider_v1", strength: 1, active: false },
         { name: "fisheye_slider_v10", strength: 1, active: true },
       ]),
     ]);
@@ -58,9 +58,9 @@ describe("upstreamLoadedLoras", () => {
     // LM's text widget deliberately retains toggled-off tags; run-time loads
     // from the panel only — preview must match the run.
     const node = host([
-      { name: "text", value: "<lora:age_slider_v20:1> <lora:fisheye_slider_v10:1>" },
+      { name: "text", value: "<lora:weather_slider_v1:1> <lora:fisheye_slider_v10:1>" },
       panel([
-        { name: "age_slider_v20", strength: 1, active: false },
+        { name: "weather_slider_v1", strength: 1, active: false },
         { name: "fisheye_slider_v10", strength: 1, active: true },
       ]),
     ]);
@@ -69,8 +69,8 @@ describe("upstreamLoadedLoras", () => {
 
   it("all-disabled panel previews as no loras, not the stale text", () => {
     const node = host([
-      { name: "text", value: "<lora:age_slider_v20:1>" },
-      panel([{ name: "age_slider_v20", strength: 1, active: false }]),
+      { name: "text", value: "<lora:weather_slider_v1:1>" },
+      panel([{ name: "weather_slider_v1", strength: 1, active: false }]),
     ]);
     // "" (authoritative zero), NOT null — the caller must not fall back to
     // last-run rows either.

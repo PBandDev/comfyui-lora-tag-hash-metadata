@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import hashlib
 import math
@@ -23,6 +23,14 @@ KNOWN_LORA_EXTENSIONS = (
     ".pt",
     ".bin",
 )
+# A1111 strips ':' and ',' from names in its `Lora hashes:` line
+# (extra_networks_lora.py); a '"' would end the quoted value early.
+LORA_HASHES_NAME_STRIP = str.maketrans("", "", '":,')
+# civitai truncates the whole settings line at the first `Resources: ` /
+# `Hashed prompt: ` / `Hashed Negative prompt: `. With ':' stripped from names,
+# only a name ENDING in one of these words can recreate that substring
+# (`<name>: <hash>`), so those names get a trailing underscore.
+CIVITAI_TRUNCATION_TOKENS = ("resources", "hashed prompt", "hashed negative prompt")
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,36 @@ class HashBridgeResult:
     resolved_loras: str
     missing_loras: str
     entries: tuple = ()
+    lora_hashes: str = ""
+    # (file stem, AutoV2) per resolved lora — the raw material of lora_hashes,
+    # exposed so the v2 node can merge civitai loras into the same line.
+    lora_pairs: tuple[tuple[str, str], ...] = ()
+
+
+def _lora_hashes_name(name: str, autov2: str) -> str:
+    cleaned = " ".join(name.translate(LORA_HASHES_NAME_STRIP).split())
+    if not cleaned:
+        return autov2
+    if cleaned.lower().endswith(CIVITAI_TRUNCATION_TOKENS):
+        return f"{cleaned}_"
+    return cleaned
+
+
+def format_lora_hashes(pairs: Iterable[tuple[str, str]]) -> str:
+    """A1111 infotext fragment `Lora hashes: "name: hash, name2: hash2"` for
+    Image Saver Metadata's `custom` input. Never weighted (the 3-field form
+    breaks every reader) and no leading comma (Image Saver prepends `, `).
+    Empty string when there is nothing to credit. One entry per hash (first
+    occurrence wins) — two tags spelling the same file differently must not
+    credit it twice."""
+    seen: set[str] = set()
+    parts: list[str] = []
+    for name, autov2 in pairs:
+        if autov2.upper() in seen:
+            continue
+        seen.add(autov2.upper())
+        parts.append(f"{_lora_hashes_name(name, autov2)}: {autov2}")
+    return f'Lora hashes: "{", ".join(parts)}"' if parts else ""
 
 
 def parse_loaded_loras(value: str) -> list[tuple[str, float]]:
@@ -115,6 +153,7 @@ def build_additional_hashes(
     resolved_loras: list[str] = []
     missing_loras: list[str] = []
     entries: list[dict] = []
+    lora_pairs: list[tuple[str, str]] = []
 
     for name, weight in deduped.items():
         if "," in name:
@@ -143,6 +182,9 @@ def build_additional_hashes(
         file_hash = sha256_10(resolved_path)
         formatted_hashes.append(f"{name}:{file_hash}:{weight}")
         resolved_loras.append(name)
+        # A1111 keys `Lora hashes` by the file's bare stem, not the tag text
+        # (which may carry a subfolder or different casing).
+        lora_pairs.append((Path(resolved_path).stem, file_hash))
         entries.append(
             {
                 "kind": "lora",
@@ -158,6 +200,8 @@ def build_additional_hashes(
         resolved_loras=",".join(resolved_loras),
         missing_loras=",".join(missing_loras),
         entries=tuple(entries),
+        lora_hashes=format_lora_hashes(lora_pairs),
+        lora_pairs=tuple(lora_pairs),
     )
 
 
@@ -168,22 +212,28 @@ class LoraManagerToImageSaverHashes(io.ComfyNode):
             node_id="LoraTagsToHashMetadata",
             display_name="LoRA Tags To Hash Metadata",
             category="utils/metadata",
-            description="Convert <lora:name:weight> tags into Name:HASH:Weight metadata strings for downstream nodes.",
+            description=(
+                "Convert <lora:name:weight> tags into Name:HASH:Weight metadata strings for "
+                "downstream nodes, plus an A1111 `Lora hashes:` fragment for Image Saver "
+                "Metadata's custom input."
+            ),
             inputs=[io.String.Input("loaded_loras", multiline=True)],
             outputs=[
                 io.String.Output("additional_hashes"),
                 io.String.Output("resolved_loras"),
                 io.String.Output("missing_loras"),
+                io.String.Output("lora_hashes"),
             ],
         )
 
     @classmethod
-    def execute(cls, loaded_loras: str) -> tuple[str, str, str]:
+    def execute(cls, loaded_loras: str) -> tuple[str, str, str, str]:
         result = build_additional_hashes(loaded_loras)
         return (
             result.additional_hashes,
             result.resolved_loras,
             result.missing_loras,
+            result.lora_hashes,
         )
 
 

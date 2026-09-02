@@ -21,9 +21,17 @@ except ImportError:
 from comfy_api.v0_0_2 import io
 
 if __package__:
-    from .lora_manager_to_image_saver_hashes import build_additional_hashes, resolve_lora_path
+    from .lora_manager_to_image_saver_hashes import (
+        build_additional_hashes,
+        format_lora_hashes,
+        resolve_lora_path,
+    )
 else:
-    from lora_manager_to_image_saver_hashes import build_additional_hashes, resolve_lora_path
+    from lora_manager_to_image_saver_hashes import (
+        build_additional_hashes,
+        format_lora_hashes,
+        resolve_lora_path,
+    )
 
 time_real = time.time
 API_HOSTS = ("https://civitai.com", "https://civitai.red")
@@ -36,6 +44,9 @@ USER_AGENT = "comfyui-lora-tag-hash-metadata"
 FETCH_BREAKER_LIMIT = 2
 # Image Saver's parse_manual_hashes silently ignores entries past 30.
 IMAGE_SAVER_MANUAL_CAP = 30
+# civitai model types that belong in the A1111 `Lora hashes:` line (mirrors the
+# picker's lora-ish set); workflows, encoders, checkpoints etc. stay out.
+LORA_HASHES_TYPES = frozenset({"lora", "locon", "dora"})
 AUTOV2_RE = re.compile(r"^[0-9A-F]{10}$")
 # civitai image urls carry a transform directive segment right before the
 # filename (e.g. /original=true/ or /width=450/) — swap it for a thumbnail.
@@ -292,8 +303,9 @@ def _file_autov2(file_entry: object) -> str | None:
         return None
     value = str(hashes.get("AutoV2") or "").upper()
     # Emitting an unvalidated value downstream could inject extra CSV entries
-    # or exceed Image Saver's hash length cap.
-    return value if AUTOV2_RE.match(value) else None
+    # or exceed Image Saver's hash length cap. fullmatch: `match` + `$` would
+    # still accept a trailing newline.
+    return value if AUTOV2_RE.fullmatch(value) else None
 
 
 def _pick_autov2(files: list, file_id: int | None) -> str:
@@ -407,6 +419,7 @@ class ResourceReport:
     resolved: str
     missing: str
     resources_json: str
+    lora_hashes: str = ""
 
 
 def build_resource_report(
@@ -438,6 +451,7 @@ def build_resource_report(
     resolved_names = [from_v1.resolved_loras] if from_v1.resolved_loras else []
     missing_parts = [from_v1.missing_loras] if from_v1.missing_loras else []
     emitted_count = sum(1 for entry in entries if entry.get("status") == "resolved")
+    lora_pairs: list[tuple[str, str]] = list(from_v1.lora_pairs)
 
     # Circuit breaker: once the API proves unreachable, stop burning the full
     # retry budget on every remaining uncached line (30 lines could otherwise
@@ -487,6 +501,8 @@ def build_resource_report(
         seen_hashes.add(res.autov2.upper())
         hash_parts.append(format_entry(name, res.autov2, res.weight))
         resolved_names.append(name)
+        if res.type.lower() in LORA_HASHES_TYPES:
+            lora_pairs.append((name, res.autov2))
         emitted_count += 1
         if emitted_count > IMAGE_SAVER_MANUAL_CAP:
             entry["warning"] = (
@@ -499,6 +515,7 @@ def build_resource_report(
         resolved=",".join(resolved_names),
         missing=",".join(missing_parts),
         resources_json=json.dumps(entries),
+        lora_hashes=format_lora_hashes(lora_pairs),
     )
 
 
@@ -570,7 +587,8 @@ class CivitaiResourcesToHashMetadata(io.ComfyNode):
             description=(
                 "Credit local lora tags AND any CivitAI resource (URL / AutoV2 / SHA256 / "
                 "AIR, one per line; optional trailing weight; # comments) as "
-                "Name:AUTOV2[:Weight] metadata entries."
+                "Name:AUTOV2[:Weight] metadata entries, plus an A1111 `Lora hashes:` "
+                "fragment for Image Saver Metadata's custom input."
             ),
             inputs=[
                 io.String.Input("loaded_loras", multiline=True, optional=True, force_input=True),
@@ -586,6 +604,7 @@ class CivitaiResourcesToHashMetadata(io.ComfyNode):
                 io.String.Output("resolved"),
                 io.String.Output("missing"),
                 io.String.Output("resources_json"),
+                io.String.Output("lora_hashes"),
             ],
             # Output node: executes standalone so the status list fills without
             # requiring a downstream saver to be wired up.
@@ -600,6 +619,7 @@ class CivitaiResourcesToHashMetadata(io.ComfyNode):
             report.resolved,
             report.missing,
             report.resources_json,
+            report.lora_hashes,
             ui={
                 "civitai_resources_status": [report.resources_json],
                 # Frontend staleness guard: a run that resolved an older

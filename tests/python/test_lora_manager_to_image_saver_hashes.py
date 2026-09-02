@@ -176,6 +176,7 @@ def test_node_schema_exposes_expected_io() -> None:
         "additional_hashes",
         "resolved_loras",
         "missing_loras",
+        "lora_hashes",
     ]
 
 
@@ -195,7 +196,12 @@ def test_node_execute_wraps_hash_bridge_logic(
     result = LoraManagerToImageSaverHashes.execute("<lora:foo:0.8> <lora:bar:1.2>")
 
     expected_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
-    assert result == (f"foo:{expected_hash}:0.8", "foo", "bar")
+    assert result == (
+        f"foo:{expected_hash}:0.8",
+        "foo",
+        "bar",
+        f'Lora hashes: "foo: {expected_hash}"',
+    )
 
 
 def test_parse_single_lora() -> None:
@@ -441,6 +447,7 @@ def test_execute_resolves_actual_loaded_loras_shape_with_dotted_version(
         "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23:F7180E92E5:1.0",
         "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23",
         "",
+        'Lora hashes: "anima_preview2_rdbt_finetuned_cfg_distilled_v0.23: F7180E92E5"',
     )
 
 
@@ -495,3 +502,114 @@ def test_sha256_10_hashes_without_path_read_bytes(
     monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
 
     assert sha256_10(str(target)) == hashlib.sha256(payload).hexdigest().upper()[:10]
+
+
+def test_lora_hashes_fragment_quotes_and_separators(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    bar = tmp_path / "bar.safetensors"
+    foo.write_bytes(b"abc")
+    bar.write_bytes(b"xyz")
+
+    result = build_additional_hashes(
+        "<lora:foo:0.8> <lora:bar:1.2>",
+        lambda name: {"foo": str(foo), "bar": str(bar)}.get(name),
+    )
+
+    foo_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    bar_hash = hashlib.sha256(b"xyz").hexdigest().upper()[:10]
+    # A1111 grammar: quoted, `, ` between entries, `: ` between name and hash,
+    # no weights, no leading comma (Image Saver prepends its own).
+    assert result.lora_hashes == f'Lora hashes: "foo: {foo_hash}, bar: {bar_hash}"'
+
+
+def test_lora_hashes_dedup_matches_additional_hashes_order(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    bar = tmp_path / "bar.safetensors"
+    foo.write_bytes(b"abc")
+    bar.write_bytes(b"xyz")
+
+    result = build_additional_hashes(
+        "<lora:foo:0.8> <lora:bar:1.2> <lora:foo:0.5>",
+        lambda name: {"foo": str(foo), "bar": str(bar)}.get(name),
+    )
+
+    foo_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    bar_hash = hashlib.sha256(b"xyz").hexdigest().upper()[:10]
+    assert result.lora_hashes == f'Lora hashes: "bar: {bar_hash}, foo: {foo_hash}"'
+
+
+def test_lora_hashes_empty_when_nothing_resolved() -> None:
+    assert build_additional_hashes("", lambda name: None).lora_hashes == ""
+    assert build_additional_hashes("<lora:bar:1.2>", lambda name: None).lora_hashes == ""
+
+
+def test_format_lora_hashes_strips_quote_comma_colon_from_names() -> None:
+    # Mirrors A1111's str.maketrans('', '', ':,') plus the quote that would
+    # terminate the quoted value early.
+    assert lora_hashes.format_lora_hashes([('a"b:c,d', "ABCDEF1234")]) == (
+        'Lora hashes: "abcd: ABCDEF1234"'
+    )
+
+
+def test_format_lora_hashes_collapses_whitespace_to_single_line() -> None:
+    assert lora_hashes.format_lora_hashes([("foo\nbar", "ABCDEF1234")]) == (
+        'Lora hashes: "foo bar: ABCDEF1234"'
+    )
+
+
+def test_format_lora_hashes_never_appends_weight_even_for_decimal_hash() -> None:
+    # additional_hashes pins `:1.0` on all-decimal hashes for Image Saver;
+    # the 3-field form breaks every Lora hashes reader, so never here.
+    assert lora_hashes.format_lora_hashes([("x", "1234567890")]) == (
+        'Lora hashes: "x: 1234567890"'
+    )
+
+
+def test_format_lora_hashes_falls_back_to_hash_when_name_empties() -> None:
+    assert lora_hashes.format_lora_hashes([('":,', "ABCDEF1234")]) == (
+        'Lora hashes: "ABCDEF1234: ABCDEF1234"'
+    )
+
+
+def test_format_lora_hashes_avoids_civitai_truncation_tokens() -> None:
+    out = lora_hashes.format_lora_hashes(
+        [
+            ("My Resources", "AAAAAAAAAA"),
+            ("Hashed prompt", "BBBBBBBBBB"),
+            ("Hashed Negative prompt", "CCCCCCCCCC"),
+        ]
+    )
+    # civitai truncates the whole settings line at the first of these.
+    for token in ("Resources: ", "Hashed prompt: ", "Hashed Negative prompt: "):
+        assert token not in out
+    for autov2 in ("AAAAAAAAAA", "BBBBBBBBBB", "CCCCCCCCCC"):
+        assert f": {autov2}" in out
+
+
+def test_lora_hashes_uses_resolved_file_stem_not_tag_path(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    foo.write_bytes(b"abc")
+
+    result = build_additional_hashes(
+        "<lora:nested/foo:0.8>",
+        lambda name: str(foo) if name == "nested/foo" else None,
+    )
+
+    foo_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    # A1111 keys Lora hashes by the file's bare stem; the tag's path form is
+    # kept only where it always was (additional_hashes / resolved_loras).
+    assert result.additional_hashes == f"nested/foo:{foo_hash}:0.8"
+    assert result.lora_hashes == f'Lora hashes: "foo: {foo_hash}"'
+
+
+def test_lora_hashes_dedups_tags_that_resolve_to_the_same_file(tmp_path: Path) -> None:
+    foo = tmp_path / "foo.safetensors"
+    foo.write_bytes(b"abc")
+
+    result = build_additional_hashes(
+        "<lora:foo:1> <lora:Foo:0.5>",
+        lambda name: str(foo) if name.lower() == "foo" else None,
+    )
+
+    foo_hash = hashlib.sha256(b"abc").hexdigest().upper()[:10]
+    assert result.lora_hashes == f'Lora hashes: "foo: {foo_hash}"'

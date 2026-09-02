@@ -49,6 +49,7 @@ function chainPrompt(civitaiResources: string, filename: string): Record<string,
         width: 64,
         height: 64,
         additional_hashes: ["n3", 0],
+        custom: ["n3", 4], // lora_hashes -> A1111 `Lora hashes:` fragment
         download_civitai_data: true,
         easy_remix: true,
       },
@@ -110,7 +111,7 @@ test("LM loras readiness poll", async ({ request }) => {
       },
       { timeout: 120_000 },
     )
-    .toBeGreaterThanOrEqual(3);
+    .toBeGreaterThanOrEqual(2);
 });
 
 test("full chain: LM -> hash node -> Image Saver PNG credits lora fixture", async ({ request }) => {
@@ -121,6 +122,8 @@ test("full chain: LM -> hash node -> Image Saver PNG credits lora fixture", asyn
   // (with modelName) is expected; the Hashes fallback still carries our AutoV2.
   expect(params.includes("Civitai resources:") || params.includes(FISHEYE_AUTOV2)).toBe(true);
   expect(params.toLowerCase()).toContain("fisheye");
+  // `custom` lands verbatim in the settings line, quoted A1111 grammar intact.
+  expect(params).toContain(`, Lora hashes: "fisheye_slider_v10: ${FISHEYE_AUTOV2}", `);
 });
 
 test("v2 URL box credits workflow + encoder + detailer via live api", async ({ request }) => {
@@ -140,4 +143,10 @@ test("v2 URL box credits workflow + encoder + detailer via live api", async ({ r
   expect(params.toLowerCase()).toContain("detailer");
   // All three example resources resolve; only the bogus model id is missing.
   expect(params).not.toContain("999999999");
+  // Lora hashes = loaded lora + the pinned detailer (type LORA) only, anchored
+  // to exactly two entries so the workflow / text encoder lines stay out.
+  const loraHashes = /Lora hashes: "([^"]*)"/.exec(params)?.[1] ?? "";
+  expect(loraHashes).toMatch(
+    new RegExp(`^fisheye_slider_v10: ${FISHEYE_AUTOV2}, [^,]*detailer[^,]*: CD64AF8696$`, "i"),
+  );
 });
