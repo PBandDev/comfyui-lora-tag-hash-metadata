@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "comfyui-lora-tag-hash-metadata"
-version = "2.0.3"
+version = "2.1.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
